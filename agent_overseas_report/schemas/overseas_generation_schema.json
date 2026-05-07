@@ -28,6 +28,7 @@
     "version": {"type": "integer", "minimum": 1, "description": "方案版本号，支持同一企业多轮生成。"},
     "final_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100, "description": "最终综合得分。"},
     "maturity_level": {"type": ["string", "null"], "enum": ["初级出海型", "增长型", "全球化布局型", null], "description": "企业出海成熟度分级。"},
+    "error_reason": {"type": ["string", "null"], "description": "生成失败时保存的错误原因；成功时为空。"},
     "output_word": {"$ref": "#/$defs/generated_file_ref"},
     "output_ppt": {"$ref": "#/$defs/generated_file_ref"},
     "output_excel": {"$ref": "#/$defs/generated_file_ref"},

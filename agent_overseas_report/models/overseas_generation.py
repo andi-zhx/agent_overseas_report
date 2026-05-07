@@ -217,6 +217,7 @@ class GenerationProject:
     version: int = 1
     final_score: float | None = None
     maturity_level: MaturityLevel | None = None
+    error_reason: str | None = None
     output_word: GeneratedFileRef | None = None
     output_ppt: GeneratedFileRef | None = None
     output_excel: GeneratedFileRef | None = None
