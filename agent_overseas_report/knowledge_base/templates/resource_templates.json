@@ -1,0 +1,122 @@
+[
+  {
+    "resource_type": "渠道代理商",
+    "resource_category": "channel",
+    "resource_subtype": "agent",
+    "description": "负责区域市场开发、报价跟进、客户维护和本地售后协调的代理或经销伙伴。",
+    "applicable_industries": ["建材", "医疗器械", "工业设备", "电子产品", "家居用品"],
+    "applicable_regions": ["中东", "东南亚", "北美", "欧洲", "拉美/北美近岸"],
+    "matching_tags": ["渠道开发", "分销", "本地客户", "售后协调"],
+    "selection_criteria": ["覆盖目标客户群", "有同类产品经验", "信用和回款能力良好", "可提供本地服务"],
+    "maintenance_fields": ["name", "country_name", "region", "contact_name", "contact_email", "website_url", "capability_tags", "notes"],
+    "recommended_use": "用于目标国家进入初期的渠道验证、样品销售和重点客户开发。"
+  },
+  {
+    "resource_type": "电商平台",
+    "resource_category": "channel",
+    "resource_subtype": "ecommerce_platform",
+    "description": "面向 C 端或小 B 端的线上销售平台及其运营服务生态。",
+    "applicable_industries": ["消费品", "电子产品", "家居用品", "纺织服装", "食品及农产品"],
+    "applicable_regions": ["东南亚", "北美", "欧洲", "中东"],
+    "matching_tags": ["跨境电商", "内容营销", "平台履约", "数据验证"],
+    "selection_criteria": ["目标客群匹配", "佣金和履约成本可控", "支持本地支付和退货", "合规规则清晰"],
+    "maintenance_fields": ["platform_name", "country_name", "seller_requirements", "fee_notes", "service_provider", "notes"],
+    "recommended_use": "用于快速测试产品需求、价格带、评价反馈和广告转化效率。"
+  },
+  {
+    "resource_type": "海外仓",
+    "resource_category": "supply_chain",
+    "resource_subtype": "overseas_warehouse",
+    "description": "提供本地仓储、订单履约、退货处理和部分增值服务的仓配资源。",
+    "applicable_industries": ["消费品", "电子产品", "家居用品", "建材", "纺织服装"],
+    "applicable_regions": ["北美", "欧洲", "东南亚", "中东"],
+    "matching_tags": ["本地履约", "备货", "退货处理", "尾程配送"],
+    "selection_criteria": ["靠近核心消费区", "计费透明", "系统对接能力", "退换货和质检能力"],
+    "maintenance_fields": ["warehouse_name", "country_name", "city", "storage_fee", "fulfillment_fee", "supported_platforms", "notes"],
+    "recommended_use": "用于提升交付时效、降低尾程成本并支持本地退换货。"
+  },
+  {
+    "resource_type": "物流服务商",
+    "resource_category": "supply_chain",
+    "resource_subtype": "logistics",
+    "description": "提供海运、空运、铁运、清关、保险和尾程配送的综合物流伙伴。",
+    "applicable_industries": ["建材", "工业设备", "食品及农产品", "电子产品", "家居用品", "纺织服装"],
+    "applicable_regions": ["中东", "东南亚", "北美", "欧洲", "拉美/北美近岸"],
+    "matching_tags": ["国际运输", "清关", "冷链", "大件物流", "项目物流"],
+    "selection_criteria": ["目的国清关经验", "可处理品类特殊要求", "报价和时效稳定", "异常响应机制"],
+    "maintenance_fields": ["provider_name", "lanes", "customs_capability", "cold_chain", "insurance", "contact_email", "notes"],
+    "recommended_use": "用于核算 landed cost、设计交付路径和降低清关/运输风险。"
+  },
+  {
+    "resource_type": "认证检测机构",
+    "resource_category": "technology",
+    "resource_subtype": "testing_certification",
+    "description": "提供目标市场准入认证、检测、注册咨询和工厂审核服务的机构。",
+    "applicable_industries": ["医疗器械", "电子产品", "建材", "食品及农产品", "纺织服装", "家居用品"],
+    "applicable_regions": ["欧洲", "北美", "中东", "东南亚"],
+    "matching_tags": ["合规准入", "产品测试", "注册", "标签审核"],
+    "selection_criteria": ["资质被目标市场认可", "熟悉具体品类标准", "周期和费用明确", "可提供整改建议"],
+    "maintenance_fields": ["institution_name", "certification_scope", "country_name", "contact_email", "website_url", "notes"],
+    "recommended_use": "用于在方案生成阶段判断准入路径、认证周期、预算和关键风险。"
+  },
+  {
+    "resource_type": "商协会",
+    "resource_category": "government_institution",
+    "resource_subtype": "business_association",
+    "description": "连接当地企业、政府机构、展会和会员资源的商会或行业协会。",
+    "applicable_industries": ["建材", "医疗器械", "消费品", "工业设备", "纺织服装", "食品及农产品", "电子产品", "家居用品"],
+    "applicable_regions": ["中东", "东南亚", "北美", "欧洲", "拉美/北美近岸"],
+    "matching_tags": ["资源对接", "政策咨询", "会员网络", "活动推广"],
+    "selection_criteria": ["会员质量高", "可提供行业对接", "活动频率稳定", "对中国企业友好"],
+    "maintenance_fields": ["association_name", "country_name", "industry_scope", "membership_notes", "contact_email", "website_url"],
+    "recommended_use": "用于寻找本地合作伙伴、了解政策和参加行业活动。"
+  },
+  {
+    "resource_type": "展会",
+    "resource_category": "exhibition",
+    "resource_subtype": "industry_exhibition",
+    "description": "目标市场行业展会、综合展会或采购对接活动。",
+    "applicable_industries": ["建材", "医疗器械", "消费品", "工业设备", "纺织服装", "食品及农产品", "电子产品", "家居用品"],
+    "applicable_regions": ["中东", "东南亚", "北美", "欧洲", "拉美/北美近岸"],
+    "matching_tags": ["获客", "品牌曝光", "渠道招募", "市场调研"],
+    "selection_criteria": ["买家质量", "行业匹配度", "参展成本", "往届中国展商反馈"],
+    "maintenance_fields": ["show_name", "country_name", "city", "industry_scope", "usual_month", "website_url", "notes"],
+    "recommended_use": "用于制定 12-24 个月市场推广和渠道招募计划。"
+  },
+  {
+    "resource_type": "园区",
+    "resource_category": "government_institution",
+    "resource_subtype": "industrial_park",
+    "description": "为制造、仓储、展示或区域总部提供空间、政策和配套服务的产业园区。",
+    "applicable_industries": ["工业设备", "电子产品", "建材", "食品及农产品", "纺织服装"],
+    "applicable_regions": ["东南亚", "中东", "拉美/北美近岸"],
+    "matching_tags": ["本地化制造", "仓储展示", "政策优惠", "产业集群"],
+    "selection_criteria": ["产业配套完整", "税费和租金透明", "交通便利", "政府支持明确"],
+    "maintenance_fields": ["park_name", "country_name", "city", "industry_focus", "incentive_notes", "contact_email", "notes"],
+    "recommended_use": "用于评估本地组装、售后备件中心、展示中心或区域总部落地。"
+  },
+  {
+    "resource_type": "法律/财税服务机构",
+    "resource_category": "government_institution",
+    "resource_subtype": "trade_promotion_agency",
+    "description": "提供公司设立、合同、税务、用工、知识产权和贸易合规支持的专业服务机构。",
+    "applicable_industries": ["建材", "医疗器械", "消费品", "工业设备", "纺织服装", "食品及农产品", "电子产品", "家居用品"],
+    "applicable_regions": ["中东", "东南亚", "北美", "欧洲", "拉美/北美近岸"],
+    "matching_tags": ["公司设立", "税务", "合同", "知识产权", "贸易合规"],
+    "selection_criteria": ["有中国企业服务经验", "覆盖目标国家法律税务", "报价清晰", "能提供双语支持"],
+    "maintenance_fields": ["firm_name", "country_name", "service_scope", "language_support", "contact_email", "notes"],
+    "recommended_use": "用于进入模式设计、代理合同审查、税务测算和风险控制。"
+  },
+  {
+    "resource_type": "技术协作方",
+    "resource_category": "technology",
+    "resource_subtype": "rd_collaborator",
+    "description": "提供本地化研发、系统集成、临床/应用验证或技术服务的合作伙伴。",
+    "applicable_industries": ["医疗器械", "工业设备", "电子产品", "食品及农产品", "建材"],
+    "applicable_regions": ["东南亚", "欧洲", "北美", "中东"],
+    "matching_tags": ["本地化适配", "联合验证", "系统集成", "技术服务"],
+    "selection_criteria": ["技术能力匹配", "有本地客户案例", "知识产权边界清晰", "服务响应及时"],
+    "maintenance_fields": ["partner_name", "country_name", "technical_scope", "case_references", "contact_email", "notes"],
+    "recommended_use": "用于提升产品本地化适配、售前验证和售后技术响应能力。"
+  }
+]
