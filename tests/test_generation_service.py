@@ -501,3 +501,45 @@ def test_excel_export_resource_list_uses_placeholder_for_missing_resource_name(t
     [audit] = service.store.list_export_audit_logs(generation.project["id"])
     assert audit.plan_name == "示例医疗科技海外资源对接清单"
     assert audit.export_type == "Excel"
+
+def test_content_versions_track_ai_edit_restore_and_final_version(tmp_path):
+    first_payload = json.dumps({"sections": {**REQUIRED_SECTIONS, "01_enterprise_diagnosis": {"title": "AI初版诊断"}}}, ensure_ascii=False)
+    regenerated_payload = json.dumps({"sections": {**REQUIRED_SECTIONS, "01_enterprise_diagnosis": {"title": "重新生成诊断"}}}, ensure_ascii=False)
+    llm = FakeLLM([first_payload, regenerated_payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+
+    first = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+    second = service.regenerate(first.project["id"], generated_by="user-2", extra_context={"reason": "更新诊断"})
+    edited = {"sections": {**REQUIRED_SECTIONS, "01_enterprise_diagnosis": {"title": "用户编辑诊断"}}}
+    service.update_generated_content(second.project["id"], result=edited, edited_by="user-3")
+
+    history = service.list_versions(first.project["id"])
+
+    assert [version["version_number"] for version in history.versions] == [1, 2, 3]
+    assert [version["generation_source"] for version in history.versions] == ["AI生成", "重新生成", "用户编辑"]
+    assert history.versions[0]["content_json"]["sections"]["01_enterprise_diagnosis"]["title"] == "AI初版诊断"
+
+    restored = service.restore_version(second.project["id"], 1, restored_by="user-4")
+    assert restored.result["sections"]["01_enterprise_diagnosis"]["title"] == "AI初版诊断"
+    final_version = service.mark_final_version(second.project["id"], 2, finalized_by="user-5")
+    assert final_version["is_final"] is True
+
+    from agent_overseas_report.services import WordExportRequest
+
+    export = service.export_word(WordExportRequest(project_id=second.project["id"], exported_by="user-6", output_dir=tmp_path))
+
+    import zipfile
+
+    with zipfile.ZipFile(export.file_path) as docx:
+        document_xml = docx.read("word/document.xml").decode("utf-8")
+
+    assert "重新生成诊断" in document_xml
+    assert "用户编辑诊断" not in document_xml

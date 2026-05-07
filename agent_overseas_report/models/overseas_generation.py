@@ -13,6 +13,14 @@ from enum import Enum
 from typing import Any
 
 
+class GenerationSource(str, Enum):
+    """方案内容版本来源。"""
+
+    AI_GENERATED = "AI生成"
+    USER_EDIT = "用户编辑"
+    REGENERATED = "重新生成"
+
+
 class GenerationStatus(str, Enum):
     """出海方案生成任务状态，支持异步生成流程扩展。"""
 
@@ -199,6 +207,30 @@ class OverseasGenerationResult:
     risk_warnings: list[dict[str, Any]] = field(default_factory=list)
     next_action_suggestions: list[str] = field(default_factory=list)
     raw_payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PlanContentVersion:
+    """出海方案正文的不可变历史版本。"""
+
+    project_id: str
+    version_number: int
+    created_by: str | None
+    created_at: datetime
+    generation_source: GenerationSource
+    change_summary: str | None
+    content_json: dict[str, Any]
+    id: str | None = None
+    source_project_id: str | None = None
+    generation_status: GenerationStatus = GenerationStatus.COMPLETED
+    is_final: bool = False
+    finalized_by: str | None = None
+    finalized_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为适合 JSON 持久化或 API 响应的字典结构。"""
+
+        return _serialize(asdict(self))
 
 
 @dataclass(slots=True)

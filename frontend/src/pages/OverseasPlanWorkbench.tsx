@@ -52,11 +52,25 @@ export type RoadmapItem = {
   owner?: string;
 };
 
+export type GenerationSource = "AI生成" | "用户编辑" | "重新生成";
+
+export type PlanVersionRecord = {
+  version_number: number;
+  created_by?: string;
+  created_at: string;
+  generation_source: GenerationSource;
+  change_summary?: string;
+  content_json: { sections: EditableSections; countryMatrix?: CountryMatrixItem[]; roadmap?: RoadmapItem[] };
+  is_final?: boolean;
+};
+
 export type GeneratedPlan = {
   projectId?: string;
   sections: EditableSections;
   countryMatrix: CountryMatrixItem[];
   roadmap: RoadmapItem[];
+  currentVersionNumber?: number;
+  versions?: PlanVersionRecord[];
 };
 
 export type GeneratePlanPayload = {
@@ -77,6 +91,8 @@ export type OverseasPlanWorkbenchProps = {
   onGenerate?: (payload: GeneratePlanPayload) => Promise<GeneratedPlan>;
   onSaveDraft?: (draft: GeneratePlanPayload & { sections: EditableSections }) => Promise<void>;
   onExport?: (type: ExportType, plan: GeneratedPlan) => Promise<void>;
+  onRestoreVersion?: (version: PlanVersionRecord, plan: GeneratedPlan) => Promise<GeneratedPlan | void>;
+  onMarkFinalVersion?: (version: PlanVersionRecord, plan: GeneratedPlan) => Promise<PlanVersionRecord | void>;
 };
 
 const sectionTabs: Array<{ key: PlanSectionKey; label: string }> = [
@@ -152,7 +168,8 @@ const emptySections: EditableSections = {
 const buildPreviewPlan = (enterprise: EnterpriseProfile | undefined, countries: string[]): GeneratedPlan => {
   const countryNames = countries.length > 0 ? countries : ["德国", "美国", "阿联酋"];
 
-  return {
+  const createdAt = new Date().toISOString();
+  const previewPlan: GeneratedPlan = {
     projectId: `preview-${Date.now()}`,
     sections: {
       enterpriseDiagnosis: `${enterprise?.name ?? "所选企业"}已具备基础产品与认证能力，建议优先补齐目标国准入、英文销售素材和本地售后网络。`,
@@ -178,6 +195,46 @@ const buildPreviewPlan = (enterprise: EnterpriseProfile | undefined, countries: 
       { period: "12-24个月", title: "本地化布局", actions: ["评估海外仓/服务中心", "规划扩产与融资节点"], owner: "管理层" },
     ],
   };
+  previewPlan.currentVersionNumber = 1;
+  previewPlan.versions = [{
+    version_number: 1,
+    created_by: "AI",
+    created_at: createdAt,
+    generation_source: "AI生成",
+    change_summary: "AI首次生成方案",
+    content_json: { sections: previewPlan.sections, countryMatrix: previewPlan.countryMatrix, roadmap: previewPlan.roadmap },
+  }];
+  return previewPlan;
+};
+
+const createLocalVersion = (
+  plan: GeneratedPlan,
+  createdBy: string,
+  generationSource: GenerationSource,
+  changeSummary: string,
+): PlanVersionRecord => {
+  const latestVersionNumber = Math.max(0, ...(plan.versions ?? []).map((version) => version.version_number));
+
+  return {
+    version_number: latestVersionNumber + 1,
+    created_by: createdBy,
+    created_at: new Date().toISOString(),
+    generation_source: generationSource,
+    change_summary: changeSummary,
+    content_json: { sections: plan.sections, countryMatrix: plan.countryMatrix, roadmap: plan.roadmap },
+  };
+};
+
+const ensureVersionHistory = (plan: GeneratedPlan, createdBy: string, generationSource: GenerationSource): GeneratedPlan => {
+  if (plan.versions?.length) {
+    return {
+      ...plan,
+      currentVersionNumber: plan.currentVersionNumber ?? plan.versions[plan.versions.length - 1]?.version_number,
+    };
+  }
+
+  const version = createLocalVersion(plan, createdBy, generationSource, generationSource === "重新生成" ? "AI重新生成方案" : "AI生成方案");
+  return { ...plan, currentVersionNumber: version.version_number, versions: [version] };
 };
 
 export default function OverseasPlanWorkbench({
@@ -189,6 +246,8 @@ export default function OverseasPlanWorkbench({
   onGenerate,
   onSaveDraft,
   onExport,
+  onRestoreVersion,
+  onMarkFinalVersion,
 }: OverseasPlanWorkbenchProps) {
   const [enterpriseId, setEnterpriseId] = useState(enterprises[0]?.id ?? "");
   const [productIds, setProductIds] = useState<string[]>([]);
@@ -200,6 +259,8 @@ export default function OverseasPlanWorkbench({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [showVersionPanel, setShowVersionPanel] = useState(false);
+  const [previewVersionNumber, setPreviewVersionNumber] = useState<number | null>(null);
 
   const selectedEnterprise = enterprises.find((enterprise) => enterprise.id === enterpriseId);
   const availableProducts = useMemo(
@@ -251,8 +312,9 @@ export default function OverseasPlanWorkbench({
       const nextPlan = onGenerate ? await onGenerate(payload) : await new Promise<GeneratedPlan>((resolve) => {
         window.setTimeout(() => resolve(buildPreviewPlan(selectedEnterprise, selectedCountryNames)), 700);
       });
-      setPlan(nextPlan);
-      setNotice("方案已生成，可在预览区编辑后导出。");
+      setPlan(ensureVersionHistory(nextPlan, currentUserId, "AI生成"));
+      setPreviewVersionNumber(nextPlan.currentVersionNumber ?? nextPlan.versions?.[nextPlan.versions.length - 1]?.version_number ?? null);
+      setNotice("方案已生成，可在预览区编辑后导出，也可进入版本记录查看历史。");
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : "方案生成失败，请稍后重试。");
     } finally {
@@ -264,8 +326,12 @@ export default function OverseasPlanWorkbench({
     setSaving(true);
     setError("");
     try {
+      const nextVersion = createLocalVersion(plan, currentUserId, "用户编辑", "用户保存草稿/编辑内容");
+      const nextPlan = { ...plan, currentVersionNumber: nextVersion.version_number, versions: [...(plan.versions ?? []), nextVersion] };
+      setPlan(nextPlan);
+      setPreviewVersionNumber(nextVersion.version_number);
       await onSaveDraft?.({ ...payload, sections: plan.sections });
-      setNotice("草稿已保存。");
+      setNotice("草稿已保存，并已写入版本记录。");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "保存草稿失败，请稍后重试。");
     } finally {
@@ -280,6 +346,55 @@ export default function OverseasPlanWorkbench({
       setNotice("导出任务已提交，请在下载中心查看生成文件。");
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "导出失败，请稍后重试。");
+    }
+  };
+
+  const versionBeingPreviewed = plan.versions?.find((version) => version.version_number === previewVersionNumber);
+  const visiblePlan = versionBeingPreviewed
+    ? {
+      ...plan,
+      sections: versionBeingPreviewed.content_json.sections,
+      countryMatrix: versionBeingPreviewed.content_json.countryMatrix ?? plan.countryMatrix,
+      roadmap: versionBeingPreviewed.content_json.roadmap ?? plan.roadmap,
+    }
+    : plan;
+  const isViewingHistoricalVersion = Boolean(versionBeingPreviewed && versionBeingPreviewed.version_number !== plan.currentVersionNumber);
+
+  const handleSelectVersion = (version: PlanVersionRecord) => {
+    setPreviewVersionNumber(version.version_number);
+    setNotice(`正在查看 v${version.version_number}，如需继续使用请点击恢复为当前版本。`);
+  };
+
+  const handleRestoreVersion = async (version: PlanVersionRecord) => {
+    setError("");
+    try {
+      const restored = await onRestoreVersion?.(version, plan);
+      const nextPlan = restored ?? {
+        ...plan,
+        sections: version.content_json.sections,
+        countryMatrix: version.content_json.countryMatrix ?? plan.countryMatrix,
+        roadmap: version.content_json.roadmap ?? plan.roadmap,
+        currentVersionNumber: version.version_number,
+      };
+      setPlan(nextPlan);
+      setPreviewVersionNumber(nextPlan.currentVersionNumber ?? version.version_number);
+      setNotice(`已恢复 v${version.version_number} 为当前版本。`);
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "恢复版本失败，请稍后重试。");
+    }
+  };
+
+  const handleMarkFinalVersion = async (version: PlanVersionRecord) => {
+    setError("");
+    try {
+      await onMarkFinalVersion?.(version, plan);
+      setPlan((current) => ({
+        ...current,
+        versions: current.versions?.map((item) => ({ ...item, is_final: item.version_number === version.version_number })),
+      }));
+      setNotice(`v${version.version_number} 已设为最终版，后续导出将默认使用该版本。`);
+    } catch (finalError) {
+      setError(finalError instanceof Error ? finalError.message : "设置最终版失败，请稍后重试。");
     }
   };
 
@@ -368,6 +483,37 @@ export default function OverseasPlanWorkbench({
         </dl>
       </section>
 
+      <section className="version-entry-card">
+        <div>
+          <p className="card-label">版本记录</p>
+          <h2>当前版本：v{plan.currentVersionNumber ?? "--"}</h2>
+          <p>每次AI生成、重新生成和用户保存编辑都会保留历史版本；导出默认使用最终版，没有最终版时使用最新完成版。</p>
+        </div>
+        <button type="button" className="button button--secondary" onClick={() => setShowVersionPanel((open) => !open)}>
+          {showVersionPanel ? "收起版本记录" : "查看版本记录"}
+        </button>
+      </section>
+
+      {showVersionPanel && (
+        <section className="version-panel" aria-label="方案版本记录">
+          {(plan.versions ?? []).map((version) => (
+            <article className={version.version_number === previewVersionNumber ? "version-item version-item--active" : "version-item"} key={version.version_number}>
+              <div>
+                <strong>v{version.version_number}{version.is_final ? " · 最终版" : ""}</strong>
+                <span>{new Date(version.created_at).toLocaleString()} · {version.created_by ?? "--"} · {version.generation_source}</span>
+                {version.change_summary && <p>{version.change_summary}</p>}
+              </div>
+              <div className="version-item__actions">
+                <button type="button" onClick={() => handleSelectVersion(version)}>切换查看</button>
+                <button type="button" onClick={() => handleRestoreVersion(version)}>恢复为当前版本</button>
+                <button type="button" onClick={() => handleMarkFinalVersion(version)} disabled={version.is_final}>设为最终版</button>
+              </div>
+            </article>
+          ))}
+          {(plan.versions ?? []).length === 0 && <div className="empty-state">生成或保存方案后展示版本记录。</div>}
+        </section>
+      )}
+
       <section className="preview-grid">
         <article className="preview-card">
           <div className="tab-list" role="tablist">
@@ -377,7 +523,8 @@ export default function OverseasPlanWorkbench({
               </button>
             ))}
           </div>
-          <textarea className="editor" value={plan.sections[activeTab]} onChange={(event) => updateSection(event.target.value)} aria-label={`${sectionTabs.find((tab) => tab.key === activeTab)?.label}编辑区`} />
+          <textarea className="editor" value={visiblePlan.sections[activeTab]} onChange={(event) => updateSection(event.target.value)} aria-label={`${sectionTabs.find((tab) => tab.key === activeTab)?.label}编辑区`} readOnly={isViewingHistoricalVersion} />
+          {isViewingHistoricalVersion && <p className="editor-hint">当前为历史版本只读预览，请先恢复为当前版本后再编辑。</p>}
         </article>
 
         <aside className="export-card">
@@ -399,19 +546,19 @@ export default function OverseasPlanWorkbench({
           <div className="matrix-table__row matrix-table__row--head" role="row">
             <span>国家</span><span>市场潜力</span><span>进入难度</span><span>优先级</span><span>建议</span>
           </div>
-          {plan.countryMatrix.map((item) => (
+          {visiblePlan.countryMatrix.map((item) => (
             <div className="matrix-table__row" role="row" key={item.country}>
               <span>{item.country}</span><span>{item.marketPotential}</span><span>{item.entryDifficulty}</span><span>{item.priority}</span><span>{item.recommendation}</span>
             </div>
           ))}
-          {plan.countryMatrix.length === 0 && <div className="empty-state">生成方案后展示国家优先级矩阵。</div>}
+          {visiblePlan.countryMatrix.length === 0 && <div className="empty-state">生成方案后展示国家优先级矩阵。</div>}
         </div>
       </section>
 
       <section className="roadmap-card">
         <div className="section-heading"><h2>12-24个月路线图</h2><span>按阶段推进市场验证、渠道建设与本地化布局</span></div>
         <div className="timeline">
-          {plan.roadmap.map((item) => (
+          {visiblePlan.roadmap.map((item) => (
             <article className="timeline__item" key={item.period}>
               <time>{item.period}</time>
               <h3>{item.title}</h3>
@@ -419,7 +566,7 @@ export default function OverseasPlanWorkbench({
               {item.owner && <p>负责人：{item.owner}</p>}
             </article>
           ))}
-          {plan.roadmap.length === 0 && <div className="empty-state">生成方案后展示分阶段路线图。</div>}
+          {visiblePlan.roadmap.length === 0 && <div className="empty-state">生成方案后展示分阶段路线图。</div>}
         </div>
       </section>
 

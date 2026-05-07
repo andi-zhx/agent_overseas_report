@@ -17,7 +17,14 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from agent_overseas_report.knowledge_base.repository import KnowledgeBaseTemplateRepository, get_default_template_repository
-from agent_overseas_report.models import GeneratedFileRef, GenerationProject, GenerationStatus, MaturityLevel
+from agent_overseas_report.models import (
+    GeneratedFileRef,
+    GenerationProject,
+    GenerationSource,
+    GenerationStatus,
+    MaturityLevel,
+    PlanContentVersion,
+)
 from agent_overseas_report.models.overseas_generation import utc_now
 from agent_overseas_report.prompts import build_overseas_plan_prompts
 from agent_overseas_report.services.llm_service import LLMServiceError
@@ -94,6 +101,8 @@ class OverseasPlanAuditAction:
     EXPORT_PPT = "export_ppt"
     EXPORT_EXCEL_ACTION_PLAN = "export_excel_action_plan"
     EXPORT_RESOURCE_LIST = "export_resource_list"
+    RESTORE_VERSION = "restore_version"
+    MARK_FINAL_VERSION = "mark_final_version"
     ARCHIVE_PLAN = "archive_plan"
     DELETE_PLAN = "delete_plan"
 
@@ -175,6 +184,16 @@ class GenerationPreviewResponse:
     audit_log: dict[str, Any]
 
 
+@dataclass(slots=True)
+class PlanVersionListResponse:
+    """Version history payload for frontend preview switching."""
+
+    project_id: str
+    current_version_number: int | None
+    final_version_number: int | None
+    versions: list[dict[str, Any]]
+
+
 class InMemoryEnterpriseDataRepository:
     """Small adapter for tests/demos until real enterprise/product tables exist."""
 
@@ -207,6 +226,7 @@ class InMemoryGenerationStore:
 
     def __init__(self) -> None:
         self._projects: dict[str, GenerationProject] = {}
+        self._versions: dict[str, list[PlanContentVersion]] = {}
         self._audit_logs: list[OverseasPlanAuditLog] = []
 
     def next_version(self, enterprise_id: str) -> int:
@@ -215,8 +235,59 @@ class InMemoryGenerationStore:
 
     def save_project(self, project: GenerationProject) -> GenerationProject:
         project.updated_at = utc_now()
+        project.metadata.setdefault("plan_group_id", project.id)
         self._projects[project.id] = copy.deepcopy(project)
         return project
+
+    def get_plan_group_id(self, project_id: str) -> str | None:
+        project = self._projects.get(project_id)
+        if project is None:
+            return None
+        return str(project.metadata.get("plan_group_id") or project.id)
+
+    def next_content_version(self, project_id: str) -> int:
+        group_id = self.get_plan_group_id(project_id) or project_id
+        versions = self._versions.get(group_id, [])
+        return max((version.version_number for version in versions), default=0) + 1
+
+    def append_content_version(self, version: PlanContentVersion) -> PlanContentVersion:
+        group_id = self.get_plan_group_id(version.project_id) or version.project_id
+        version.project_id = group_id
+        if version.id is None:
+            version.id = f"opv_{uuid4().hex}"
+        self._versions.setdefault(group_id, []).append(copy.deepcopy(version))
+        return copy.deepcopy(version)
+
+    def list_content_versions(self, project_id: str) -> list[PlanContentVersion]:
+        group_id = self.get_plan_group_id(project_id) or project_id
+        versions = sorted(self._versions.get(group_id, []), key=lambda item: item.version_number)
+        return copy.deepcopy(versions)
+
+    def get_content_version(self, project_id: str, version_number: int) -> PlanContentVersion | None:
+        for version in self.list_content_versions(project_id):
+            if version.version_number == version_number:
+                return version
+        return None
+
+    def mark_final_content_version(self, project_id: str, version_number: int, *, finalized_by: str | None) -> PlanContentVersion | None:
+        group_id = self.get_plan_group_id(project_id) or project_id
+        selected: PlanContentVersion | None = None
+        versions = self._versions.get(group_id, [])
+        now = utc_now()
+        for version in versions:
+            version.is_final = version.version_number == version_number
+            if version.is_final:
+                version.finalized_by = finalized_by
+                version.finalized_at = now
+                selected = copy.deepcopy(version)
+        return selected
+
+    def find_export_content_version(self, project_id: str) -> PlanContentVersion | None:
+        versions = [v for v in self.list_content_versions(project_id) if v.generation_status == GenerationStatus.COMPLETED]
+        final_versions = [version for version in versions if version.is_final]
+        if final_versions:
+            return max(final_versions, key=lambda item: item.version_number)
+        return max(versions, key=lambda item: item.version_number) if versions else None
 
     def get_project(self, project_id: str) -> GenerationProject | None:
         project = self._projects.get(project_id)
@@ -321,7 +392,12 @@ class OverseasPlanGenerationService:
             selected_industry=previous.selected_industry,
             target_countries=previous.target_countries,
             generated_by=generated_by,
-            extra_context={"regenerated_from_project_id": project_id, **(extra_context or {})},
+            extra_context={
+                "plan_group_id": previous.metadata.get("plan_group_id") or previous.id,
+                "regenerated_from_project_id": project_id,
+                "generation_source": GenerationSource.REGENERATED.value,
+                **(extra_context or {}),
+            },
             username=username,
             ip_address=ip_address,
             user_agent=user_agent,
@@ -341,8 +417,13 @@ class OverseasPlanGenerationService:
             generation_status=GenerationStatus.DRAFT,
             generated_by=request.generated_by,
             version=version,
-            metadata={"extra_context": copy.deepcopy(request.extra_context), "execution_mode": "inline_sync"},
+            metadata={
+                "extra_context": copy.deepcopy(request.extra_context),
+                "execution_mode": "inline_sync",
+                "plan_group_id": request.extra_context.get("plan_group_id") or request.project_id,
+            },
         )
+        project.metadata["plan_group_id"] = project.metadata.get("plan_group_id") or project.id
         saved_project = self.store.save_project(project)
         self._write_project_audit_log(
             saved_project,
@@ -396,6 +477,14 @@ class OverseasPlanGenerationService:
                     "json_repaired": project.metadata.get("json_repaired", False),
                 }
             )
+            content_version = self._append_content_version(
+                project,
+                created_by=project.generated_by,
+                generation_source=_source_from_extra_context(project.metadata.get("extra_context", {})),
+                change_summary=project.metadata.get("extra_context", {}).get("reason") or "AI生成完成",
+                content_json=parsed_output,
+            )
+            project.metadata["current_version_number"] = content_version.version_number
             success = True
         except Exception as exc:  # noqa: BLE001 - persist any orchestration failure for frontend visibility.
             error_reason = str(exc)
@@ -488,8 +577,17 @@ class OverseasPlanGenerationService:
         previous_keys = set(project.result or {}) if isinstance(project.result, dict) else set()
         new_keys = set(result)
         project.result = copy.deepcopy(result)
+        project.generation_status = GenerationStatus.COMPLETED
         project.metadata["last_edited_at"] = utc_now().isoformat()
         project.metadata["last_edited_by"] = edited_by
+        version = self._append_content_version(
+            project,
+            created_by=edited_by,
+            generation_source=GenerationSource.USER_EDIT,
+            change_summary=f"用户编辑：{', '.join(sorted(previous_keys ^ new_keys)) or '正文内容调整'}",
+            content_json=result,
+        )
+        project.metadata["current_version_number"] = version.version_number
         saved = self.store.save_project(project)
         self._write_project_audit_log(
             saved,
@@ -497,11 +595,103 @@ class OverseasPlanGenerationService:
             user_id=edited_by,
             username=username,
             result_status=AuditResultStatus.SUCCESS,
-            metadata={"changed_top_level_fields": sorted(previous_keys ^ new_keys)},
+            metadata={"changed_top_level_fields": sorted(previous_keys ^ new_keys), "version_number": version.version_number},
             ip_address=ip_address,
             user_agent=user_agent,
         )
         return saved
+
+    def list_versions(self, project_id: str) -> PlanVersionListResponse:
+        """List immutable content versions in the same plan history group."""
+
+        project = self.store.get_project(project_id)
+        if project is None:
+            raise DataNotFoundError(f"Generation project not found: {project_id}")
+        versions = self.store.list_content_versions(project_id)
+        final_version = next((version for version in versions if version.is_final), None)
+        return PlanVersionListResponse(
+            project_id=project_id,
+            current_version_number=project.metadata.get("current_version_number"),
+            final_version_number=final_version.version_number if final_version else None,
+            versions=[version.to_dict() for version in versions],
+        )
+
+    def get_version(self, project_id: str, version_number: int) -> dict[str, Any]:
+        """Return one historical content version for preview switching."""
+
+        version = self.store.get_content_version(project_id, version_number)
+        if version is None:
+            raise DataNotFoundError(f"Plan version not found: {project_id} v{version_number}")
+        return version.to_dict()
+
+    def restore_version(
+        self,
+        project_id: str,
+        version_number: int,
+        *,
+        restored_by: str,
+        username: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> GenerationProject:
+        """Restore a historical version as the current editable version without deleting history."""
+
+        project = self.store.get_project(project_id)
+        version = self.store.get_content_version(project_id, version_number)
+        if project is None or version is None:
+            raise DataNotFoundError(f"Plan version not found: {project_id} v{version_number}")
+        project.result = copy.deepcopy(version.content_json)
+        project.generation_status = GenerationStatus.COMPLETED
+        restored_version = self._append_content_version(
+            project,
+            created_by=restored_by,
+            generation_source=GenerationSource.USER_EDIT,
+            change_summary=f"恢复自历史版本 v{version_number}",
+            content_json=version.content_json,
+        )
+        project.metadata["current_version_number"] = restored_version.version_number
+        saved = self.store.save_project(project)
+        self._write_project_audit_log(
+            saved,
+            action_type=OverseasPlanAuditAction.RESTORE_VERSION,
+            user_id=restored_by,
+            username=username,
+            result_status=AuditResultStatus.SUCCESS,
+            metadata={"restored_from_version": version_number, "version_number": restored_version.version_number},
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return saved
+
+    def mark_final_version(
+        self,
+        project_id: str,
+        version_number: int,
+        *,
+        finalized_by: str,
+        username: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """Mark one version as final; only one final version exists per plan history group."""
+
+        project = self.store.get_project(project_id)
+        version = self.store.mark_final_content_version(project_id, version_number, finalized_by=finalized_by)
+        if project is None or version is None:
+            raise DataNotFoundError(f"Plan version not found: {project_id} v{version_number}")
+        project.metadata["final_version_number"] = version_number
+        self.store.save_project(project)
+        self._write_project_audit_log(
+            project,
+            action_type=OverseasPlanAuditAction.MARK_FINAL_VERSION,
+            user_id=finalized_by,
+            username=username,
+            result_status=AuditResultStatus.SUCCESS,
+            metadata={"final_version_number": version_number},
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return version.to_dict()
 
     def archive_plan(
         self,
@@ -595,11 +785,12 @@ class OverseasPlanGenerationService:
         try:
             if project is None:
                 raise DataNotFoundError(f"Generation project not found: {request.project_id}")
-            if project.result is None:
+            export_project = self._project_for_export(project)
+            if export_project.result is None:
                 raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
-            enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+            enterprise = self.data_repository.get_enterprise(export_project.enterprise_id)
             result = export_overseas_plan_word(
-                project=project.to_dict(),
+                project=export_project.to_dict(),
                 enterprise=enterprise,
                 output_dir=request.output_dir,
                 exported_by=request.exported_by,
@@ -626,11 +817,12 @@ class OverseasPlanGenerationService:
         try:
             if project is None:
                 raise DataNotFoundError(f"Generation project not found: {request.project_id}")
-            if project.result is None:
+            export_project = self._project_for_export(project)
+            if export_project.result is None:
                 raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
-            enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+            enterprise = self.data_repository.get_enterprise(export_project.enterprise_id)
             result = export_overseas_plan_excel(
-                project=project.to_dict(),
+                project=export_project.to_dict(),
                 enterprise=enterprise,
                 export_kind=request.export_kind,
                 output_dir=request.output_dir,
@@ -658,11 +850,12 @@ class OverseasPlanGenerationService:
         try:
             if project is None:
                 raise DataNotFoundError(f"Generation project not found: {request.project_id}")
-            if project.result is None:
+            export_project = self._project_for_export(project)
+            if export_project.result is None:
                 raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
-            enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+            enterprise = self.data_repository.get_enterprise(export_project.enterprise_id)
             result = export_overseas_plan_ppt(
-                project=project.to_dict(),
+                project=export_project.to_dict(),
                 enterprise=enterprise,
                 output_dir=request.output_dir,
                 exported_by=request.exported_by,
@@ -681,6 +874,41 @@ class OverseasPlanGenerationService:
                 error_message=str(exc),
             )
             raise
+
+    def _append_content_version(
+        self,
+        project: GenerationProject,
+        *,
+        created_by: str | None,
+        generation_source: GenerationSource,
+        change_summary: str | None,
+        content_json: dict[str, Any],
+    ) -> PlanContentVersion:
+        return self.store.append_content_version(
+            PlanContentVersion(
+                project_id=project.id,
+                source_project_id=project.id,
+                version_number=self.store.next_content_version(project.id),
+                created_by=created_by,
+                created_at=utc_now(),
+                generation_source=generation_source,
+                change_summary=change_summary,
+                content_json=copy.deepcopy(content_json),
+                generation_status=GenerationStatus.COMPLETED,
+            )
+        )
+
+    def _project_for_export(self, project: GenerationProject) -> GenerationProject:
+        selected_version = self.store.find_export_content_version(project.id)
+        if selected_version is None:
+            return project
+        export_project = copy.deepcopy(project)
+        export_project.result = copy.deepcopy(selected_version.content_json)
+        export_project.version = selected_version.version_number
+        export_project.metadata["export_version_number"] = selected_version.version_number
+        export_project.metadata["export_version_source"] = selected_version.generation_source.value
+        export_project.metadata["export_uses_final_version"] = selected_version.is_final
+        return export_project
 
     def _load_enterprise_payload(self, project: GenerationProject) -> dict[str, Any]:
         enterprise = self.data_repository.get_enterprise(project.enterprise_id)
@@ -887,6 +1115,12 @@ class OverseasPlanGenerationService:
             version=project.version if project else None,
             exported_by=getattr(request, "exported_by", None),
         )
+
+
+def _source_from_extra_context(extra_context: dict[str, Any]) -> GenerationSource:
+    if extra_context.get("generation_source") == GenerationSource.REGENERATED.value or extra_context.get("regenerated_from_project_id"):
+        return GenerationSource.REGENERATED
+    return GenerationSource.AI_GENERATED
 
 
 def _context_from_generation_request(request: GenerationRequest) -> RequestAuditContext:
