@@ -12,6 +12,7 @@ import copy
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -56,6 +57,16 @@ class PlanLLMClient(Protocol):
 
 
 @dataclass(slots=True)
+class RequestAuditContext:
+    """Optional HTTP/user context supplied by API handlers for audit logs."""
+
+    user_id: str | None = None
+    username: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+
+
+@dataclass(slots=True)
 class GenerationRequest:
     """Input DTO for creating a new overseas-plan generation version."""
 
@@ -66,22 +77,71 @@ class GenerationRequest:
     generated_by: str
     project_id: str | None = None
     extra_context: dict[str, Any] = field(default_factory=dict)
+    username: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+
+
+class OverseasPlanAuditAction:
+    """Stable audit action codes reserved for backend/API integrations."""
+
+    CREATE_PLAN = "create_plan"
+    AI_GENERATE_PLAN = "ai_generate_plan"
+    REGENERATE_PLAN = "regenerate_plan"
+    VIEW_PLAN_DETAIL = "view_plan_detail"
+    EDIT_AI_CONTENT = "edit_ai_content"
+    EXPORT_WORD = "export_word"
+    EXPORT_PPT = "export_ppt"
+    EXPORT_EXCEL_ACTION_PLAN = "export_excel_action_plan"
+    EXPORT_RESOURCE_LIST = "export_resource_list"
+    ARCHIVE_PLAN = "archive_plan"
+    DELETE_PLAN = "delete_plan"
+
+
+class AuditResultStatus:
+    """Result status values for audit records."""
+
+    SUCCESS = "success"
+    FAILED = "failed"
 
 
 @dataclass(slots=True)
-class GenerationAuditLog:
-    """Append-only audit record for every generation attempt."""
+class OverseasPlanAuditLog:
+    """Append-only audit record for overseas-plan operations.
+
+    The log stores identifiers and operational metadata only. Generated AI body
+    content is intentionally excluded to prevent sensitive report text from
+    entering audit storage.
+    """
 
     id: str
-    project_id: str
-    version: int
-    generated_by: str
-    generated_at: str
-    enterprise_id: str
+    user_id: str | None
+    username: str | None
+    action_type: str
+    enterprise_id: str | None
+    plan_id: str | None
     product_ids: list[str]
     target_countries: list[str]
-    success: bool
+    export_type: str | None
+    created_at: str
+    ip_address: str | None
+    user_agent: str | None
+    result_status: str
+    error_message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    # Backward-compatible fields used by existing generation/export callers.
+    project_id: str | None = None
+    version: int | None = None
+    generated_by: str | None = None
+    generated_at: str | None = None
+    success: bool | None = None
     error_reason: str | None = None
+    exported_by: str | None = None
+    exported_at: str | None = None
+    enterprise_name: str | None = None
+    plan_name: str | None = None
+    file_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable audit-log payload."""
@@ -90,24 +150,20 @@ class GenerationAuditLog:
 
 
 @dataclass(slots=True)
-class ExportAuditLog:
-    """Append-only audit record for every document export action."""
+class AuditLogQuery:
+    """Filter object reserved for backend audit-log query endpoints."""
 
-    id: str
-    project_id: str
-    version: int
-    exported_by: str
-    exported_at: str
-    enterprise_id: str
-    enterprise_name: str
-    plan_name: str
-    export_type: str
-    file_path: str
+    enterprise_id: str | None = None
+    user_id: str | None = None
+    username: str | None = None
+    action_type: str | None = None
+    created_from: str | datetime | None = None
+    created_to: str | datetime | None = None
+    plan_id: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serializable export audit-log payload."""
 
-        return asdict(self)
+GenerationAuditLog = OverseasPlanAuditLog
+ExportAuditLog = OverseasPlanAuditLog
 
 
 @dataclass(slots=True)
@@ -146,13 +202,12 @@ class InMemoryGenerationStore:
     """Versioned plan store with append-only audit logs.
 
     The interface mirrors operations expected from a future database repository:
-    save project, find latest version, and append audit logs.
+    save project, find latest version, and append/query audit logs.
     """
 
     def __init__(self) -> None:
         self._projects: dict[str, GenerationProject] = {}
-        self._audit_logs: list[GenerationAuditLog] = []
-        self._export_audit_logs: list[ExportAuditLog] = []
+        self._audit_logs: list[OverseasPlanAuditLog] = []
 
     def next_version(self, enterprise_id: str) -> int:
         versions = [project.version for project in self._projects.values() if project.enterprise_id == enterprise_id]
@@ -167,24 +222,33 @@ class InMemoryGenerationStore:
         project = self._projects.get(project_id)
         return copy.deepcopy(project) if project else None
 
-    def append_audit_log(self, audit_log: GenerationAuditLog) -> GenerationAuditLog:
+    def delete_project(self, project_id: str) -> GenerationProject | None:
+        project = self._projects.pop(project_id, None)
+        return copy.deepcopy(project) if project else None
+
+    def append_audit_log(self, audit_log: OverseasPlanAuditLog) -> OverseasPlanAuditLog:
         self._audit_logs.append(copy.deepcopy(audit_log))
         return audit_log
 
-    def list_audit_logs(self, project_id: str | None = None) -> list[GenerationAuditLog]:
+    def list_audit_logs(
+        self,
+        project_id: str | None = None,
+        query: AuditLogQuery | None = None,
+    ) -> list[OverseasPlanAuditLog]:
         logs = self._audit_logs
         if project_id is not None:
-            logs = [log for log in logs if log.project_id == project_id]
+            logs = [log for log in logs if log.plan_id == project_id or log.project_id == project_id]
+        if query is not None:
+            logs = _filter_audit_logs(logs, query)
         return copy.deepcopy(logs)
 
-    def append_export_audit_log(self, audit_log: ExportAuditLog) -> ExportAuditLog:
-        self._export_audit_logs.append(copy.deepcopy(audit_log))
-        return audit_log
+    def append_export_audit_log(self, audit_log: OverseasPlanAuditLog) -> OverseasPlanAuditLog:
+        return self.append_audit_log(audit_log)
 
-    def list_export_audit_logs(self, project_id: str | None = None) -> list[ExportAuditLog]:
-        logs = self._export_audit_logs
+    def list_export_audit_logs(self, project_id: str | None = None) -> list[OverseasPlanAuditLog]:
+        logs = [log for log in self._audit_logs if _is_export_action(log.action_type)]
         if project_id is not None:
-            logs = [log for log in logs if log.project_id == project_id]
+            logs = [log for log in logs if log.plan_id == project_id or log.project_id == project_id]
         return copy.deepcopy(logs)
 
 
@@ -211,14 +275,46 @@ class OverseasPlanGenerationService:
         """
 
         project = self.create_generation(request)
-        return self.run_generation(project.id)
+        return self.run_generation(project.id, audit_context=_context_from_generation_request(request))
 
-    def regenerate(self, project_id: str, *, generated_by: str, extra_context: dict[str, Any] | None = None) -> GenerationPreviewResponse:
+    def regenerate(
+        self,
+        project_id: str,
+        *,
+        generated_by: str,
+        extra_context: dict[str, Any] | None = None,
+        username: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> GenerationPreviewResponse:
         """Generate a new version from a historical project without overwriting it."""
 
         previous = self.store.get_project(project_id)
         if previous is None:
+            self._write_audit_log(
+                action_type=OverseasPlanAuditAction.REGENERATE_PLAN,
+                user_id=generated_by,
+                username=username,
+                enterprise_id=None,
+                plan_id=project_id,
+                product_ids=[],
+                target_countries=[],
+                result_status=AuditResultStatus.FAILED,
+                error_message=f"Generation project not found: {project_id}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
             raise DataNotFoundError(f"Generation project not found: {project_id}")
+        self._write_project_audit_log(
+            previous,
+            action_type=OverseasPlanAuditAction.REGENERATE_PLAN,
+            user_id=generated_by,
+            username=username,
+            result_status=AuditResultStatus.SUCCESS,
+            metadata={"regenerated_from_project_id": project_id},
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
         request = GenerationRequest(
             enterprise_id=previous.enterprise_id,
             product_ids=previous.product_ids,
@@ -226,6 +322,9 @@ class OverseasPlanGenerationService:
             target_countries=previous.target_countries,
             generated_by=generated_by,
             extra_context={"regenerated_from_project_id": project_id, **(extra_context or {})},
+            username=username,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         return self.generate(request)
 
@@ -244,9 +343,19 @@ class OverseasPlanGenerationService:
             version=version,
             metadata={"extra_context": copy.deepcopy(request.extra_context), "execution_mode": "inline_sync"},
         )
-        return self.store.save_project(project)
+        saved_project = self.store.save_project(project)
+        self._write_project_audit_log(
+            saved_project,
+            action_type=OverseasPlanAuditAction.CREATE_PLAN,
+            user_id=request.generated_by,
+            username=request.username,
+            result_status=AuditResultStatus.SUCCESS,
+            ip_address=request.ip_address,
+            user_agent=request.user_agent,
+        )
+        return saved_project
 
-    def run_generation(self, project_id: str) -> GenerationPreviewResponse:
+    def run_generation(self, project_id: str, audit_context: RequestAuditContext | None = None) -> GenerationPreviewResponse:
         """Run the full enterprise/product/template/rule/DeepSeek workflow."""
 
         project = self.store.get_project(project_id)
@@ -296,98 +405,282 @@ class OverseasPlanGenerationService:
             project.metadata["error_reason"] = error_reason
         finally:
             self.store.save_project(project)
-            audit_log = self._write_audit_log(project, success=success, error_reason=error_reason)
+            audit_log = self._write_project_audit_log(
+                project,
+                action_type=OverseasPlanAuditAction.AI_GENERATE_PLAN,
+                user_id=(audit_context.user_id if audit_context else project.generated_by) or project.generated_by,
+                username=audit_context.username if audit_context else None,
+                result_status=AuditResultStatus.SUCCESS if success else AuditResultStatus.FAILED,
+                error_message=error_reason,
+                ip_address=audit_context.ip_address if audit_context else None,
+                user_agent=audit_context.user_agent if audit_context else None,
+            )
 
         return GenerationPreviewResponse(project=project.to_dict(), preview=project.result, audit_log=audit_log.to_dict())
 
 
-    def export_word(self, request: WordExportRequest) -> WordExportResult:
-        """Export a completed overseas-plan project to a Word document.
+    def view_plan_detail(
+        self,
+        project_id: str,
+        *,
+        user_id: str,
+        username: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """Return plan detail and audit the view action."""
 
-        The method keeps the existing Excel export slot untouched and only updates
-        ``output_word`` plus the dedicated export audit log. API handlers can map
-        this method to ``POST /api/overseas-plans/{project_id}/exports/word``.
-        """
+        project = self.store.get_project(project_id)
+        if project is None:
+            self._write_audit_log(
+                action_type=OverseasPlanAuditAction.VIEW_PLAN_DETAIL,
+                user_id=user_id,
+                username=username,
+                enterprise_id=None,
+                plan_id=project_id,
+                product_ids=[],
+                target_countries=[],
+                result_status=AuditResultStatus.FAILED,
+                error_message=f"Generation project not found: {project_id}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            raise DataNotFoundError(f"Generation project not found: {project_id}")
+        self._write_project_audit_log(
+            project,
+            action_type=OverseasPlanAuditAction.VIEW_PLAN_DETAIL,
+            user_id=user_id,
+            username=username,
+            result_status=AuditResultStatus.SUCCESS,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return project.to_dict()
+
+    def update_generated_content(
+        self,
+        project_id: str,
+        *,
+        result: dict[str, Any],
+        edited_by: str,
+        username: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> GenerationProject:
+        """Replace AI generated content and audit only changed top-level fields."""
+
+        project = self.store.get_project(project_id)
+        if project is None:
+            self._write_audit_log(
+                action_type=OverseasPlanAuditAction.EDIT_AI_CONTENT,
+                user_id=edited_by,
+                username=username,
+                enterprise_id=None,
+                plan_id=project_id,
+                product_ids=[],
+                target_countries=[],
+                result_status=AuditResultStatus.FAILED,
+                error_message=f"Generation project not found: {project_id}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            raise DataNotFoundError(f"Generation project not found: {project_id}")
+        previous_keys = set(project.result or {}) if isinstance(project.result, dict) else set()
+        new_keys = set(result)
+        project.result = copy.deepcopy(result)
+        project.metadata["last_edited_at"] = utc_now().isoformat()
+        project.metadata["last_edited_by"] = edited_by
+        saved = self.store.save_project(project)
+        self._write_project_audit_log(
+            saved,
+            action_type=OverseasPlanAuditAction.EDIT_AI_CONTENT,
+            user_id=edited_by,
+            username=username,
+            result_status=AuditResultStatus.SUCCESS,
+            metadata={"changed_top_level_fields": sorted(previous_keys ^ new_keys)},
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return saved
+
+    def archive_plan(
+        self,
+        project_id: str,
+        *,
+        user_id: str,
+        username: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> GenerationProject:
+        """Mark a plan as archived and audit the archive action."""
+
+        project = self.store.get_project(project_id)
+        if project is None:
+            self._write_audit_log(
+                action_type=OverseasPlanAuditAction.ARCHIVE_PLAN,
+                user_id=user_id,
+                username=username,
+                enterprise_id=None,
+                plan_id=project_id,
+                product_ids=[],
+                target_countries=[],
+                result_status=AuditResultStatus.FAILED,
+                error_message=f"Generation project not found: {project_id}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            raise DataNotFoundError(f"Generation project not found: {project_id}")
+        project.metadata["archived"] = True
+        project.metadata["archived_at"] = utc_now().isoformat()
+        project.metadata["archived_by"] = user_id
+        saved = self.store.save_project(project)
+        self._write_project_audit_log(
+            saved,
+            action_type=OverseasPlanAuditAction.ARCHIVE_PLAN,
+            user_id=user_id,
+            username=username,
+            result_status=AuditResultStatus.SUCCESS,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return saved
+
+    def delete_plan(
+        self,
+        project_id: str,
+        *,
+        user_id: str,
+        username: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> GenerationProject:
+        """Delete a plan from the lightweight store and keep the audit trail."""
+
+        project = self.store.delete_project(project_id)
+        if project is None:
+            self._write_audit_log(
+                action_type=OverseasPlanAuditAction.DELETE_PLAN,
+                user_id=user_id,
+                username=username,
+                enterprise_id=None,
+                plan_id=project_id,
+                product_ids=[],
+                target_countries=[],
+                result_status=AuditResultStatus.FAILED,
+                error_message=f"Generation project not found: {project_id}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            raise DataNotFoundError(f"Generation project not found: {project_id}")
+        self._write_project_audit_log(
+            project,
+            action_type=OverseasPlanAuditAction.DELETE_PLAN,
+            user_id=user_id,
+            username=username,
+            result_status=AuditResultStatus.SUCCESS,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return project
+
+    def list_plan_audit_logs(self, query: AuditLogQuery | None = None) -> list[dict[str, Any]]:
+        """Query audit logs by enterprise, user, action type and time range."""
+
+        return [log.to_dict() for log in self.store.list_audit_logs(query=query)]
+
+    def export_word(self, request: WordExportRequest) -> WordExportResult:
+        """Export a completed overseas-plan project to a Word document."""
 
         project = self.store.get_project(request.project_id)
-        if project is None:
-            raise DataNotFoundError(f"Generation project not found: {request.project_id}")
-        if project.result is None:
-            raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
-
-        enterprise = self.data_repository.get_enterprise(project.enterprise_id)
-        result = export_overseas_plan_word(
-            project=project.to_dict(),
-            enterprise=enterprise,
-            output_dir=request.output_dir,
-            exported_by=request.exported_by,
-            system_name=request.system_name,
-        )
-
-        project.output_word = GeneratedFileRef(file_path=result.file_path)
-        self.store.save_project(project)
-        self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
-        return result
+        try:
+            if project is None:
+                raise DataNotFoundError(f"Generation project not found: {request.project_id}")
+            if project.result is None:
+                raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
+            enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+            result = export_overseas_plan_word(
+                project=project.to_dict(),
+                enterprise=enterprise,
+                output_dir=request.output_dir,
+                exported_by=request.exported_by,
+                system_name=request.system_name,
+            )
+            project.output_word = GeneratedFileRef(file_path=result.file_path)
+            self.store.save_project(project)
+            self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result, request=request)
+            return result
+        except Exception as exc:
+            self._write_export_failure_audit_log(
+                action_type=OverseasPlanAuditAction.EXPORT_WORD,
+                export_type="Word",
+                project=project,
+                request=request,
+                error_message=str(exc),
+            )
+            raise
 
     def export_excel(self, request: ExcelExportRequest) -> ExcelExportResult:
-        """Export a completed overseas-plan project to an Excel workbook.
-
-        API handlers can map this method to either
-        ``POST /api/overseas-plans/{project_id}/exports/excel-action-plan``
-        or ``POST /api/overseas-plans/{project_id}/exports/resource-list`` by
-        passing the corresponding ``export_kind``.  The method only updates the
-        overseas-plan ``output_excel`` field and dedicated export audit log; it
-        does not touch upstream enterprise/product Excel import-export code.
-        """
+        """Export a completed overseas-plan project to an Excel workbook."""
 
         project = self.store.get_project(request.project_id)
-        if project is None:
-            raise DataNotFoundError(f"Generation project not found: {request.project_id}")
-        if project.result is None:
-            raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
-
-        enterprise = self.data_repository.get_enterprise(project.enterprise_id)
-        result = export_overseas_plan_excel(
-            project=project.to_dict(),
-            enterprise=enterprise,
-            export_kind=request.export_kind,
-            output_dir=request.output_dir,
-            exported_by=request.exported_by,
-            system_name=request.system_name,
-        )
-
-        project.output_excel = GeneratedFileRef(file_path=result.file_path)
-        self.store.save_project(project)
-        self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
-        return result
+        try:
+            if project is None:
+                raise DataNotFoundError(f"Generation project not found: {request.project_id}")
+            if project.result is None:
+                raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
+            enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+            result = export_overseas_plan_excel(
+                project=project.to_dict(),
+                enterprise=enterprise,
+                export_kind=request.export_kind,
+                output_dir=request.output_dir,
+                exported_by=request.exported_by,
+                system_name=request.system_name,
+            )
+            project.output_excel = GeneratedFileRef(file_path=result.file_path)
+            self.store.save_project(project)
+            self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result, request=request)
+            return result
+        except Exception as exc:
+            self._write_export_failure_audit_log(
+                action_type=_excel_export_action_type(getattr(request, "export_kind", None)),
+                export_type="Excel",
+                project=project,
+                request=request,
+                error_message=str(exc),
+            )
+            raise
 
     def export_ppt(self, request: PPTExportRequest) -> PPTExportResult:
-        """Export a completed overseas-plan project to a PowerPoint deck.
-
-        The method only updates ``output_ppt`` and the dedicated export audit log,
-        leaving existing Word/Excel export fields untouched. API handlers can map
-        this method to ``POST /api/overseas-plans/{project_id}/exports/ppt``.
-        """
+        """Export a completed overseas-plan project to a PowerPoint deck."""
 
         project = self.store.get_project(request.project_id)
-        if project is None:
-            raise DataNotFoundError(f"Generation project not found: {request.project_id}")
-        if project.result is None:
-            raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
-
-        enterprise = self.data_repository.get_enterprise(project.enterprise_id)
-        result = export_overseas_plan_ppt(
-            project=project.to_dict(),
-            enterprise=enterprise,
-            output_dir=request.output_dir,
-            exported_by=request.exported_by,
-            system_name=request.system_name,
-        )
-
-        project.output_ppt = GeneratedFileRef(file_path=result.file_path)
-        self.store.save_project(project)
-        self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
-        return result
+        try:
+            if project is None:
+                raise DataNotFoundError(f"Generation project not found: {request.project_id}")
+            if project.result is None:
+                raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
+            enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+            result = export_overseas_plan_ppt(
+                project=project.to_dict(),
+                enterprise=enterprise,
+                output_dir=request.output_dir,
+                exported_by=request.exported_by,
+                system_name=request.system_name,
+            )
+            project.output_ppt = GeneratedFileRef(file_path=result.file_path)
+            self.store.save_project(project)
+            self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result, request=request)
+            return result
+        except Exception as exc:
+            self._write_export_failure_audit_log(
+                action_type=OverseasPlanAuditAction.EXPORT_PPT,
+                export_type="PPT",
+                project=project,
+                request=request,
+                error_message=str(exc),
+            )
+            raise
 
     def _load_enterprise_payload(self, project: GenerationProject) -> dict[str, Any]:
         enterprise = self.data_repository.get_enterprise(project.enterprise_id)
@@ -450,35 +743,211 @@ class OverseasPlanGenerationService:
         _validate_plan_payload(parsed)
         return parsed
 
-    def _write_audit_log(self, project: GenerationProject, *, success: bool, error_reason: str | None) -> GenerationAuditLog:
-        audit_log = GenerationAuditLog(
-            id=f"oga_{uuid4().hex}",
-            project_id=project.id,
-            version=project.version,
-            generated_by=project.generated_by or "system",
-            generated_at=utc_now().isoformat(),
+    def _write_project_audit_log(
+        self,
+        project: GenerationProject,
+        *,
+        action_type: str,
+        user_id: str | None,
+        username: str | None,
+        result_status: str,
+        error_message: str | None = None,
+        export_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> OverseasPlanAuditLog:
+        return self._write_audit_log(
+            action_type=action_type,
+            user_id=user_id,
+            username=username,
             enterprise_id=project.enterprise_id,
+            plan_id=project.id,
             product_ids=list(project.product_ids),
             target_countries=list(project.target_countries),
+            result_status=result_status,
+            error_message=error_message,
+            export_type=export_type,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            version=project.version,
+            generated_by=project.generated_by,
+            metadata=metadata,
+        )
+
+    def _write_audit_log(
+        self,
+        *,
+        action_type: str,
+        user_id: str | None,
+        username: str | None,
+        enterprise_id: str | None,
+        plan_id: str | None,
+        product_ids: list[str],
+        target_countries: list[str],
+        result_status: str,
+        error_message: str | None = None,
+        export_type: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        version: int | None = None,
+        generated_by: str | None = None,
+        generated_at: str | None = None,
+        exported_by: str | None = None,
+        exported_at: str | None = None,
+        enterprise_name: str | None = None,
+        plan_name: str | None = None,
+        file_path: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> OverseasPlanAuditLog:
+        created_at = utc_now().isoformat()
+        success = result_status == AuditResultStatus.SUCCESS
+        audit_log = OverseasPlanAuditLog(
+            id=f"opa_{uuid4().hex}",
+            user_id=user_id,
+            username=username,
+            action_type=action_type,
+            enterprise_id=enterprise_id,
+            plan_id=plan_id,
+            product_ids=list(product_ids),
+            target_countries=list(target_countries),
+            export_type=export_type,
+            created_at=created_at,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            result_status=result_status,
+            error_message=error_message,
+            metadata=copy.deepcopy(metadata or {}),
+            project_id=plan_id,
+            version=version,
+            generated_by=generated_by or user_id,
+            generated_at=generated_at or (created_at if action_type == OverseasPlanAuditAction.AI_GENERATE_PLAN else None),
             success=success,
-            error_reason=error_reason,
+            error_reason=error_message,
+            exported_by=exported_by,
+            exported_at=exported_at,
+            enterprise_name=enterprise_name,
+            plan_name=plan_name,
+            file_path=file_path,
         )
         return self.store.append_audit_log(audit_log)
 
-    def _write_export_audit_log(self, *, project: GenerationProject, enterprise: dict[str, Any], export_result: WordExportResult | PPTExportResult | ExcelExportResult) -> ExportAuditLog:
-        audit_log = ExportAuditLog(
-            id=f"oea_{uuid4().hex}",
-            project_id=project.id,
+    def _write_export_audit_log(
+        self,
+        *,
+        project: GenerationProject,
+        enterprise: dict[str, Any],
+        export_result: WordExportResult | PPTExportResult | ExcelExportResult,
+        request: WordExportRequest | PPTExportRequest | ExcelExportRequest,
+    ) -> ExportAuditLog:
+        action_type = _export_action_type(export_result)
+        return self._write_audit_log(
+            action_type=action_type,
+            user_id=export_result.exported_by,
+            username=getattr(request, "username", None),
+            enterprise_id=project.enterprise_id,
+            enterprise_name=enterprise.get("name") or enterprise.get("enterprise_name") or project.enterprise_id,
+            plan_id=project.id,
+            product_ids=list(project.product_ids),
+            target_countries=list(project.target_countries),
+            export_type=export_result.export_type,
+            result_status=AuditResultStatus.SUCCESS,
+            ip_address=getattr(request, "ip_address", None),
+            user_agent=getattr(request, "user_agent", None),
             version=project.version,
             exported_by=export_result.exported_by,
             exported_at=export_result.exported_at,
-            enterprise_id=project.enterprise_id,
-            enterprise_name=enterprise.get("name") or enterprise.get("enterprise_name") or project.enterprise_id,
             plan_name=export_result.plan_name,
-            export_type=export_result.export_type,
             file_path=export_result.file_path,
+            metadata={"export_kind": getattr(export_result, "export_kind", None)},
         )
-        return self.store.append_export_audit_log(audit_log)
+
+    def _write_export_failure_audit_log(
+        self,
+        *,
+        action_type: str,
+        export_type: str,
+        project: GenerationProject | None,
+        request: WordExportRequest | PPTExportRequest | ExcelExportRequest,
+        error_message: str,
+    ) -> OverseasPlanAuditLog:
+        return self._write_audit_log(
+            action_type=action_type,
+            user_id=getattr(request, "exported_by", None),
+            username=getattr(request, "username", None),
+            enterprise_id=project.enterprise_id if project else None,
+            plan_id=getattr(request, "project_id", None),
+            product_ids=list(project.product_ids) if project else [],
+            target_countries=list(project.target_countries) if project else [],
+            export_type=export_type,
+            result_status=AuditResultStatus.FAILED,
+            error_message=error_message,
+            ip_address=getattr(request, "ip_address", None),
+            user_agent=getattr(request, "user_agent", None),
+            version=project.version if project else None,
+            exported_by=getattr(request, "exported_by", None),
+        )
+
+
+def _context_from_generation_request(request: GenerationRequest) -> RequestAuditContext:
+    return RequestAuditContext(
+        user_id=request.generated_by,
+        username=request.username,
+        ip_address=request.ip_address,
+        user_agent=request.user_agent,
+    )
+
+
+def _is_export_action(action_type: str) -> bool:
+    return action_type in {
+        OverseasPlanAuditAction.EXPORT_WORD,
+        OverseasPlanAuditAction.EXPORT_PPT,
+        OverseasPlanAuditAction.EXPORT_EXCEL_ACTION_PLAN,
+        OverseasPlanAuditAction.EXPORT_RESOURCE_LIST,
+    }
+
+
+def _excel_export_action_type(export_kind: Any) -> str:
+    value = getattr(export_kind, "value", export_kind)
+    if value == "resource_list":
+        return OverseasPlanAuditAction.EXPORT_RESOURCE_LIST
+    return OverseasPlanAuditAction.EXPORT_EXCEL_ACTION_PLAN
+
+
+def _export_action_type(export_result: WordExportResult | PPTExportResult | ExcelExportResult) -> str:
+    if isinstance(export_result, ExcelExportResult):
+        return _excel_export_action_type(export_result.export_kind)
+    if export_result.export_type == "PPT":
+        return OverseasPlanAuditAction.EXPORT_PPT
+    return OverseasPlanAuditAction.EXPORT_WORD
+
+
+def _filter_audit_logs(logs: list[OverseasPlanAuditLog], query: AuditLogQuery) -> list[OverseasPlanAuditLog]:
+    filtered = logs
+    if query.enterprise_id is not None:
+        filtered = [log for log in filtered if log.enterprise_id == query.enterprise_id]
+    if query.user_id is not None:
+        filtered = [log for log in filtered if log.user_id == query.user_id]
+    if query.username is not None:
+        filtered = [log for log in filtered if log.username == query.username]
+    if query.action_type is not None:
+        filtered = [log for log in filtered if log.action_type == query.action_type]
+    if query.plan_id is not None:
+        filtered = [log for log in filtered if log.plan_id == query.plan_id or log.project_id == query.plan_id]
+    if query.created_from is not None:
+        start = _parse_audit_datetime(query.created_from)
+        filtered = [log for log in filtered if _parse_audit_datetime(log.created_at) >= start]
+    if query.created_to is not None:
+        end = _parse_audit_datetime(query.created_to)
+        filtered = [log for log in filtered if _parse_audit_datetime(log.created_at) <= end]
+    return filtered
+
+
+def _parse_audit_datetime(value: str | datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    normalized = value.replace("Z", "+00:00")
+    return datetime.fromisoformat(normalized)
 
 
 def _derive_product_fields(products: list[dict[str, Any]]) -> dict[str, Any]:

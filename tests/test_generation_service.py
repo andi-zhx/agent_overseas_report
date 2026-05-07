@@ -148,7 +148,48 @@ def test_regenerate_creates_new_version_without_overwriting_history():
     assert first.project["version"] == 1
     assert second.project["version"] == 2
     assert second.project["metadata"]["extra_context"]["regenerated_from_project_id"] == first.project["id"]
-    assert len(service.store.list_audit_logs()) == 2
+    logs = service.store.list_audit_logs()
+    assert [log.action_type for log in logs] == [
+        "create_plan",
+        "ai_generate_plan",
+        "regenerate_plan",
+        "create_plan",
+        "ai_generate_plan",
+    ]
+
+
+
+def test_audit_log_query_filters_and_sensitive_ai_body_is_not_logged():
+    payload = json.dumps({"sections": REQUIRED_SECTIONS, "sensitive_body": "完整AI正文不要进入日志"}, ensure_ascii=False)
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+
+    response = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+            username="张三",
+            ip_address="203.0.113.10",
+            user_agent="pytest-browser",
+        )
+    )
+    service.view_plan_detail(response.project["id"], user_id="user-1", username="张三")
+
+    from agent_overseas_report.services import AuditLogQuery
+
+    logs = service.list_plan_audit_logs(AuditLogQuery(enterprise_id="ent-1", user_id="user-1", action_type="ai_generate_plan"))
+
+    assert len(logs) == 1
+    [log] = logs
+    assert log["username"] == "张三"
+    assert log["ip_address"] == "203.0.113.10"
+    assert log["user_agent"] == "pytest-browser"
+    assert log["result_status"] == "success"
+    assert log["plan_id"] == response.project["id"]
+    assert "完整AI正文不要进入日志" not in json.dumps(log, ensure_ascii=False)
 
 
 def test_word_export_creates_docx_and_writes_export_audit_log(tmp_path):

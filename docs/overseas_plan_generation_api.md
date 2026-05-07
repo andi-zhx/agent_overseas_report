@@ -423,3 +423,71 @@ result = service.export_ppt(
 )
 print(result.file_path)
 ```
+
+## 8. 统一审计日志能力（后端预留）
+
+当前项目没有独立 Web/ORM 审计模块，因此服务层复用并扩展 `InMemoryGenerationStore` 的轻量级追加式审计日志。后续接入数据库时可按相同字段落表，例如 `overseas_plan_audit_logs`。
+
+### 审计日志数据结构
+
+每条审计日志至少包含以下字段，且不会写入完整 AI 生成正文：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 审计日志 ID，当前以前缀 `opa_` 生成。 |
+| `user_id` | string/null | 操作用户 ID；生成场景来自 `generated_by`，导出场景来自 `exported_by`。 |
+| `username` | string/null | 用户名；如 API 层能拿到则传入。 |
+| `action_type` | string | 操作类型，见下方动作清单。 |
+| `enterprise_id` | string/null | 企业 ID；若方案不存在导致失败则可为空。 |
+| `plan_id` / `project_id` | string/null | 出海方案 ID；保留 `project_id` 兼容旧调用。 |
+| `product_ids` | array | 关联产品 ID 列表。 |
+| `target_countries` | array | 目标国家/地区列表。 |
+| `export_type` | string/null | 导出类型：`Word`、`PPT`、`Excel`；非导出动作为空。 |
+| `created_at` | string | UTC ISO 时间。 |
+| `ip_address` | string/null | 当前项目/API 层可提供时记录。 |
+| `user_agent` | string/null | 当前项目/API 层可提供时记录。 |
+| `result_status` | string | `success` 或 `failed`。 |
+| `error_message` | string/null | 失败原因。 |
+| `metadata` | object | 仅保存非正文元数据，例如 `export_kind`、编辑的顶层字段名、来源版本等。 |
+
+兼容字段：`generated_by`、`generated_at`、`success`、`error_reason`、`exported_by`、`exported_at`、`enterprise_name`、`plan_name`、`file_path` 仍会填充，便于现有生成/导出调用平滑迁移。
+
+### 已接入审计日志的动作/接口
+
+| 动作 | `action_type` | 服务方法 / 建议 API |
+| --- | --- | --- |
+| 创建出海方案 | `create_plan` | `OverseasPlanGenerationService.create_generation()` / `POST /api/overseas-plans/generations` |
+| 调用 AI 生成方案 | `ai_generate_plan` | `OverseasPlanGenerationService.run_generation()` / `POST /api/overseas-plans/generations/{project_id}/run` |
+| 重新生成方案 | `regenerate_plan` | `OverseasPlanGenerationService.regenerate()` / `POST /api/overseas-plans/generations/{project_id}/regenerate` |
+| 查看方案详情 | `view_plan_detail` | `OverseasPlanGenerationService.view_plan_detail()` / `GET /api/overseas-plans/{project_id}` |
+| 编辑 AI 生成内容 | `edit_ai_content` | `OverseasPlanGenerationService.update_generated_content()` / `PATCH /api/overseas-plans/{project_id}/generated-content` |
+| 导出 Word | `export_word` | `OverseasPlanGenerationService.export_word()` / `POST /api/overseas-plans/{project_id}/exports/word` |
+| 导出 PPT | `export_ppt` | `OverseasPlanGenerationService.export_ppt()` / `POST /api/overseas-plans/{project_id}/exports/ppt` |
+| 导出 Excel 行动计划表 | `export_excel_action_plan` | `OverseasPlanGenerationService.export_excel(export_kind="action_plan")` / `POST /api/overseas-plans/{project_id}/exports/excel-action-plan` |
+| 导出资源对接清单 | `export_resource_list` | `OverseasPlanGenerationService.export_excel(export_kind="resource_list")` / `POST /api/overseas-plans/{project_id}/exports/resource-list` |
+| 归档方案 | `archive_plan` | `OverseasPlanGenerationService.archive_plan()` / `POST /api/overseas-plans/{project_id}/archive` |
+| 删除方案 | `delete_plan` | `OverseasPlanGenerationService.delete_plan()` / `DELETE /api/overseas-plans/{project_id}` |
+
+### 查询审计日志的方式
+
+后端接口可预留为：
+
+`GET /api/overseas-plans/audit-logs?enterprise_id=ent-1&user_id=user-1&action_type=ai_generate_plan&created_from=2026-05-07T00:00:00+00:00&created_to=2026-05-08T00:00:00+00:00`
+
+服务层调用示例：
+
+```python
+from agent_overseas_report.services import AuditLogQuery
+
+logs = service.list_plan_audit_logs(
+    AuditLogQuery(
+        enterprise_id="ent-1",
+        user_id="user-1",
+        action_type="ai_generate_plan",
+        created_from="2026-05-07T00:00:00+00:00",
+        created_to="2026-05-08T00:00:00+00:00",
+    )
+)
+```
+
+支持筛选条件：企业 `enterprise_id`、用户 `user_id`/`username`、动作类型 `action_type`、方案 `plan_id`、时间范围 `created_from`/`created_to`。
