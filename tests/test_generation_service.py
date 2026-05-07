@@ -228,3 +228,85 @@ def test_word_export_creates_docx_and_writes_export_audit_log(tmp_path):
     assert audit.plan_name == "示例医疗科技企业出海解决方案"
     assert audit.export_type == "Word"
     assert audit.file_path == export.file_path
+
+
+def test_ppt_export_creates_pptx_and_writes_export_audit_log(tmp_path):
+    payload = json.dumps(
+        {
+            "sections": {
+                **REQUIRED_SECTIONS,
+                "08_risk_warnings_and_next_steps": {
+                    "next_action_checklist": ["确认德国渠道名单", "启动CE认证复核"],
+                    "risk_warnings": [{"type": "policy", "description": "关注欧盟医疗器械法规变化"}],
+                },
+            },
+            "country_priority_matrix": [
+                {
+                    "country_name": "德国",
+                    "priority_rank": 1,
+                    "total_score": 88,
+                    "recommended_entry_mode": "经销代理+展会获客",
+                    "key_opportunities": ["医疗器械需求稳定"],
+                    "key_risks": ["认证周期较长"],
+                }
+            ],
+            "implementation_roadmap_12_24_months": [
+                {
+                    "time": "1-3个月",
+                    "goal": "完成准入准备",
+                    "actions": ["认证复核", "渠道筛选"],
+                    "deliverables": ["认证清单", "渠道长名单"],
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+    generation = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    from agent_overseas_report.services import PPTExportRequest
+
+    export = service.export_ppt(PPTExportRequest(project_id=generation.project["id"], exported_by="user-2", output_dir=tmp_path))
+
+    assert export.export_type == "PPT"
+    assert export.plan_name == "示例医疗科技出海解决方案"
+    assert export.file_path.endswith(".pptx")
+    assert (tmp_path / generation.project["id"]).exists()
+
+    import zipfile
+
+    with zipfile.ZipFile(export.file_path) as pptx:
+        names = pptx.namelist()
+        presentation_xml = pptx.read("ppt/presentation.xml").decode("utf-8")
+        first_slide_xml = pptx.read("ppt/slides/slide1.xml").decode("utf-8")
+        matrix_slide_xml = pptx.read("ppt/slides/slide6.xml").decode("utf-8")
+        risk_slide_xml = pptx.read("ppt/slides/slide12.xml").decode("utf-8")
+
+    assert len([name for name in names if name.startswith("ppt/slides/slide") and name.endswith(".xml")]) == 12
+    assert "Microsoft YaHei" in first_slide_xml
+    assert "《示例医疗科技出海解决方案》" in first_slide_xml
+    assert "国家优先级矩阵" in matrix_slide_xml
+    assert "近期应优先控制准入" in risk_slide_xml
+    assert "rId12" in presentation_xml
+
+    updated_project = service.store.get_project(generation.project["id"])
+    assert updated_project.output_ppt.file_path == export.file_path
+    assert updated_project.output_word is None
+    assert updated_project.output_excel is None
+
+    [audit] = service.store.list_export_audit_logs(generation.project["id"])
+    assert audit.exported_by == "user-2"
+    assert audit.enterprise_id == "ent-1"
+    assert audit.enterprise_name == "示例医疗科技"
+    assert audit.plan_name == "示例医疗科技出海解决方案"
+    assert audit.export_type == "PPT"
+    assert audit.file_path == export.file_path

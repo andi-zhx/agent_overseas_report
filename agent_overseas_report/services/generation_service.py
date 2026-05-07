@@ -21,6 +21,7 @@ from agent_overseas_report.models.overseas_generation import utc_now
 from agent_overseas_report.prompts import build_overseas_plan_prompts
 from agent_overseas_report.services.llm_service import LLMServiceError
 from agent_overseas_report.services.rule_engine import OverseasRuleEngine
+from agent_overseas_report.services.ppt_export_service import PPTExportRequest, PPTExportResult, export_overseas_plan_ppt
 from agent_overseas_report.services.word_export_service import WordExportRequest, WordExportResult, export_overseas_plan_word
 
 
@@ -327,6 +328,34 @@ class OverseasPlanGenerationService:
         self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
         return result
 
+    def export_ppt(self, request: PPTExportRequest) -> PPTExportResult:
+        """Export a completed overseas-plan project to a PowerPoint deck.
+
+        The method only updates ``output_ppt`` and the dedicated export audit log,
+        leaving existing Word/Excel export fields untouched. API handlers can map
+        this method to ``POST /api/overseas-plans/{project_id}/exports/ppt``.
+        """
+
+        project = self.store.get_project(request.project_id)
+        if project is None:
+            raise DataNotFoundError(f"Generation project not found: {request.project_id}")
+        if project.result is None:
+            raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
+
+        enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+        result = export_overseas_plan_ppt(
+            project=project.to_dict(),
+            enterprise=enterprise,
+            output_dir=request.output_dir,
+            exported_by=request.exported_by,
+            system_name=request.system_name,
+        )
+
+        project.output_ppt = GeneratedFileRef(file_path=result.file_path)
+        self.store.save_project(project)
+        self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
+        return result
+
     def _load_enterprise_payload(self, project: GenerationProject) -> dict[str, Any]:
         enterprise = self.data_repository.get_enterprise(project.enterprise_id)
         products = self.data_repository.get_products(project.enterprise_id, project.product_ids)
@@ -403,7 +432,7 @@ class OverseasPlanGenerationService:
         )
         return self.store.append_audit_log(audit_log)
 
-    def _write_export_audit_log(self, *, project: GenerationProject, enterprise: dict[str, Any], export_result: WordExportResult) -> ExportAuditLog:
+    def _write_export_audit_log(self, *, project: GenerationProject, enterprise: dict[str, Any], export_result: WordExportResult | PPTExportResult) -> ExportAuditLog:
         audit_log = ExportAuditLog(
             id=f"oea_{uuid4().hex}",
             project_id=project.id,
@@ -413,7 +442,7 @@ class OverseasPlanGenerationService:
             enterprise_id=project.enterprise_id,
             enterprise_name=enterprise.get("name") or enterprise.get("enterprise_name") or project.enterprise_id,
             plan_name=export_result.plan_name,
-            export_type="Word",
+            export_type=export_result.export_type,
             file_path=export_result.file_path,
         )
         return self.store.append_export_audit_log(audit_log)
