@@ -2,6 +2,8 @@
 
 from .rule_engine import OverseasRuleEngine
 from .generation_service import (
+    AuditLogQuery,
+    AuditResultStatus,
     DataNotFoundError,
     EnterpriseDataRepository,
     ExportAuditLog,
@@ -12,6 +14,8 @@ from .generation_service import (
     GenerationValidationError,
     InMemoryEnterpriseDataRepository,
     InMemoryGenerationStore,
+    OverseasPlanAuditAction,
+    OverseasPlanAuditLog,
     OverseasPlanGenerationService,
     PlanLLMClient,
 )
@@ -31,6 +35,8 @@ from .llm_service import (
 
 __all__ = [
     "OverseasRuleEngine",
+    "AuditLogQuery",
+    "AuditResultStatus",
     "DataNotFoundError",
     "EnterpriseDataRepository",
     "ExportAuditLog",
@@ -41,6 +47,8 @@ __all__ = [
     "GenerationValidationError",
     "InMemoryEnterpriseDataRepository",
     "InMemoryGenerationStore",
+    "OverseasPlanAuditAction",
+    "OverseasPlanAuditLog",
     "OverseasPlanGenerationService",
     "PlanLLMClient",
     "ExcelExportKind",

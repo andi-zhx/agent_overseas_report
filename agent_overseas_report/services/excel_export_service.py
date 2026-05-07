@@ -38,6 +38,9 @@ class ExcelExportRequest:
     project_id: str
     exported_by: str
     export_kind: ExcelExportKind | str
+    username: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
     output_dir: str | Path | None = None
     system_name: str = SYSTEM_NAME
 
