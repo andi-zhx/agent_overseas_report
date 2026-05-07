@@ -21,6 +21,7 @@ from agent_overseas_report.models.overseas_generation import utc_now
 from agent_overseas_report.prompts import build_overseas_plan_prompts
 from agent_overseas_report.services.llm_service import LLMServiceError
 from agent_overseas_report.services.rule_engine import OverseasRuleEngine
+from agent_overseas_report.services.excel_export_service import ExcelExportRequest, ExcelExportResult, export_overseas_plan_excel
 from agent_overseas_report.services.ppt_export_service import PPTExportRequest, PPTExportResult, export_overseas_plan_ppt
 from agent_overseas_report.services.word_export_service import WordExportRequest, WordExportResult, export_overseas_plan_word
 
@@ -328,6 +329,38 @@ class OverseasPlanGenerationService:
         self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
         return result
 
+    def export_excel(self, request: ExcelExportRequest) -> ExcelExportResult:
+        """Export a completed overseas-plan project to an Excel workbook.
+
+        API handlers can map this method to either
+        ``POST /api/overseas-plans/{project_id}/exports/excel-action-plan``
+        or ``POST /api/overseas-plans/{project_id}/exports/resource-list`` by
+        passing the corresponding ``export_kind``.  The method only updates the
+        overseas-plan ``output_excel`` field and dedicated export audit log; it
+        does not touch upstream enterprise/product Excel import-export code.
+        """
+
+        project = self.store.get_project(request.project_id)
+        if project is None:
+            raise DataNotFoundError(f"Generation project not found: {request.project_id}")
+        if project.result is None:
+            raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
+
+        enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+        result = export_overseas_plan_excel(
+            project=project.to_dict(),
+            enterprise=enterprise,
+            export_kind=request.export_kind,
+            output_dir=request.output_dir,
+            exported_by=request.exported_by,
+            system_name=request.system_name,
+        )
+
+        project.output_excel = GeneratedFileRef(file_path=result.file_path)
+        self.store.save_project(project)
+        self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
+        return result
+
     def export_ppt(self, request: PPTExportRequest) -> PPTExportResult:
         """Export a completed overseas-plan project to a PowerPoint deck.
 
@@ -432,7 +465,7 @@ class OverseasPlanGenerationService:
         )
         return self.store.append_audit_log(audit_log)
 
-    def _write_export_audit_log(self, *, project: GenerationProject, enterprise: dict[str, Any], export_result: WordExportResult | PPTExportResult) -> ExportAuditLog:
+    def _write_export_audit_log(self, *, project: GenerationProject, enterprise: dict[str, Any], export_result: WordExportResult | PPTExportResult | ExcelExportResult) -> ExportAuditLog:
         audit_log = ExportAuditLog(
             id=f"oea_{uuid4().hex}",
             project_id=project.id,
