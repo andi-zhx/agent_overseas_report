@@ -43,9 +43,10 @@ def test_country_selection_dimensions_cover_five_factor_model():
 
 
 def test_infer_maturity_level_boundaries():
-    assert infer_maturity_level(59.9) == MaturityLevel.BEGINNER
-    assert infer_maturity_level(60) == MaturityLevel.GROWTH
-    assert infer_maturity_level(80) == MaturityLevel.GLOBAL_LAYOUT
+    assert infer_maturity_level(40) == MaturityLevel.BEGINNER
+    assert infer_maturity_level(41) == MaturityLevel.GROWTH
+    assert infer_maturity_level(75) == MaturityLevel.GROWTH
+    assert infer_maturity_level(76) == MaturityLevel.GLOBAL_LAYOUT
 
 
 def test_generation_project_serializes_nested_result_for_json_storage():

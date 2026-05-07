@@ -1,5 +1,7 @@
 """Reusable service integrations for the agent overseas report project."""
 
+from .rule_engine import OverseasRuleEngine
+
 from .llm_service import (
     DeepSeekLLMService,
     LLMServiceError,
@@ -11,6 +13,7 @@ from .llm_service import (
 )
 
 __all__ = [
+    "OverseasRuleEngine",
     "DeepSeekLLMService",
     "LLMServiceError",
     "LLMConfigurationError",
