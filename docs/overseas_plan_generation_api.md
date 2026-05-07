@@ -134,3 +134,83 @@
 | `generating` | 正在读取企业/产品/模板并调用规则引擎、DeepSeek。 |
 | `completed` | DeepSeek JSON 校验通过，方案已保存并可预览。 |
 | `failed` | 生成失败，`error_reason` 会保存失败原因，并写入审计日志。 |
+
+## 5. 导出 Word 方案
+
+`POST /api/overseas-plans/{project_id}/exports/word`
+
+当前代码提供框架无关服务方法 `OverseasPlanGenerationService.export_word()`，API 层可直接映射为上述接口。导出不会修改 `output_excel` 字段，因此不影响现有 Excel 导出能力。
+
+### 请求参数
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `exported_by` | string | 是 | 发起导出的用户 ID，用于审计日志记录“谁导出”。 |
+| `output_dir` | string | 否 | Word 文件保存根目录；默认 `/tmp/agent_overseas_report/exports/word`。 |
+| `system_name` | string | 否 | 封面展示的生成机构/系统名称，默认“企业出海方案智能生成系统”。 |
+
+### 请求示例
+
+```json
+{
+  "exported_by": "user-1001",
+  "output_dir": "/tmp/agent_overseas_report/exports/word",
+  "system_name": "企业出海方案智能生成系统"
+}
+```
+
+### 成功响应示例
+
+```json
+{
+  "project_id": "ogp_2f5e...",
+  "plan_name": "示例医疗科技企业出海解决方案",
+  "export_type": "Word",
+  "file_path": "/tmp/agent_overseas_report/exports/word/ogp_2f5e.../示例医疗科技企业出海解决方案_v1_20260507080000.docx",
+  "exported_by": "user-1001",
+  "exported_at": "2026-05-07T08:00:00Z"
+}
+```
+
+### Word 文档内容
+
+导出文档标题固定为《`{企业名称}企业出海解决方案`》，并包含封面、目录和 01-08 正文章节：
+
+1. 企业现状诊断
+2. 海外市场选择
+3. 出海模式设计
+4. 海外资源对接方案
+5. 展会与市场推广计划
+6. 投融资与扩产规划
+7. 12-24个月实施路线图
+8. 风险提示与下一步建议
+
+文档使用统一标题样式、微软雅黑中文字体声明、商务蓝色标题和统一表格边框/表头底色；文件写入系统可访问路径后，项目的 `output_word.file_path` 会保存该路径。
+
+### 导出审计日志
+
+每次 Word 导出都会写入独立的导出审计日志，可通过 `InMemoryGenerationStore.list_export_audit_logs(project_id)` 查询，字段包括：
+
+| 字段 | 说明 |
+| --- | --- |
+| `exported_by` | 谁导出。 |
+| `exported_at` | 什么时候导出。 |
+| `enterprise_id` / `enterprise_name` | 哪个企业。 |
+| `project_id` / `version` / `plan_name` | 哪份方案。 |
+| `export_type` | 固定为 `Word`。 |
+| `file_path` | 实际生成文件路径。 |
+
+### 本地服务调用示例
+
+```python
+from agent_overseas_report.services import WordExportRequest
+
+result = service.export_word(
+    WordExportRequest(
+        project_id="ogp_xxx",
+        exported_by="user-1001",
+        output_dir="/tmp/agent_overseas_report/exports/word",
+    )
+)
+print(result.file_path)
+```

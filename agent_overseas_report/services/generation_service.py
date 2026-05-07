@@ -16,11 +16,12 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from agent_overseas_report.knowledge_base.repository import KnowledgeBaseTemplateRepository, get_default_template_repository
-from agent_overseas_report.models import GenerationProject, GenerationStatus, MaturityLevel
+from agent_overseas_report.models import GeneratedFileRef, GenerationProject, GenerationStatus, MaturityLevel
 from agent_overseas_report.models.overseas_generation import utc_now
 from agent_overseas_report.prompts import build_overseas_plan_prompts
 from agent_overseas_report.services.llm_service import LLMServiceError
 from agent_overseas_report.services.rule_engine import OverseasRuleEngine
+from agent_overseas_report.services.word_export_service import WordExportRequest, WordExportResult, export_overseas_plan_word
 
 
 class GenerationServiceError(RuntimeError):
@@ -87,6 +88,27 @@ class GenerationAuditLog:
 
 
 @dataclass(slots=True)
+class ExportAuditLog:
+    """Append-only audit record for every document export action."""
+
+    id: str
+    project_id: str
+    version: int
+    exported_by: str
+    exported_at: str
+    enterprise_id: str
+    enterprise_name: str
+    plan_name: str
+    export_type: str
+    file_path: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable export audit-log payload."""
+
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class GenerationPreviewResponse:
     """Frontend preview payload returned after a generation run."""
 
@@ -128,6 +150,7 @@ class InMemoryGenerationStore:
     def __init__(self) -> None:
         self._projects: dict[str, GenerationProject] = {}
         self._audit_logs: list[GenerationAuditLog] = []
+        self._export_audit_logs: list[ExportAuditLog] = []
 
     def next_version(self, enterprise_id: str) -> int:
         versions = [project.version for project in self._projects.values() if project.enterprise_id == enterprise_id]
@@ -148,6 +171,16 @@ class InMemoryGenerationStore:
 
     def list_audit_logs(self, project_id: str | None = None) -> list[GenerationAuditLog]:
         logs = self._audit_logs
+        if project_id is not None:
+            logs = [log for log in logs if log.project_id == project_id]
+        return copy.deepcopy(logs)
+
+    def append_export_audit_log(self, audit_log: ExportAuditLog) -> ExportAuditLog:
+        self._export_audit_logs.append(copy.deepcopy(audit_log))
+        return audit_log
+
+    def list_export_audit_logs(self, project_id: str | None = None) -> list[ExportAuditLog]:
+        logs = self._export_audit_logs
         if project_id is not None:
             logs = [log for log in logs if log.project_id == project_id]
         return copy.deepcopy(logs)
@@ -265,6 +298,35 @@ class OverseasPlanGenerationService:
 
         return GenerationPreviewResponse(project=project.to_dict(), preview=project.result, audit_log=audit_log.to_dict())
 
+
+    def export_word(self, request: WordExportRequest) -> WordExportResult:
+        """Export a completed overseas-plan project to a Word document.
+
+        The method keeps the existing Excel export slot untouched and only updates
+        ``output_word`` plus the dedicated export audit log. API handlers can map
+        this method to ``POST /api/overseas-plans/{project_id}/exports/word``.
+        """
+
+        project = self.store.get_project(request.project_id)
+        if project is None:
+            raise DataNotFoundError(f"Generation project not found: {request.project_id}")
+        if project.result is None:
+            raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
+
+        enterprise = self.data_repository.get_enterprise(project.enterprise_id)
+        result = export_overseas_plan_word(
+            project=project.to_dict(),
+            enterprise=enterprise,
+            output_dir=request.output_dir,
+            exported_by=request.exported_by,
+            system_name=request.system_name,
+        )
+
+        project.output_word = GeneratedFileRef(file_path=result.file_path)
+        self.store.save_project(project)
+        self._write_export_audit_log(project=project, enterprise=enterprise, export_result=result)
+        return result
+
     def _load_enterprise_payload(self, project: GenerationProject) -> dict[str, Any]:
         enterprise = self.data_repository.get_enterprise(project.enterprise_id)
         products = self.data_repository.get_products(project.enterprise_id, project.product_ids)
@@ -340,6 +402,21 @@ class OverseasPlanGenerationService:
             error_reason=error_reason,
         )
         return self.store.append_audit_log(audit_log)
+
+    def _write_export_audit_log(self, *, project: GenerationProject, enterprise: dict[str, Any], export_result: WordExportResult) -> ExportAuditLog:
+        audit_log = ExportAuditLog(
+            id=f"oea_{uuid4().hex}",
+            project_id=project.id,
+            version=project.version,
+            exported_by=export_result.exported_by,
+            exported_at=export_result.exported_at,
+            enterprise_id=project.enterprise_id,
+            enterprise_name=enterprise.get("name") or enterprise.get("enterprise_name") or project.enterprise_id,
+            plan_name=export_result.plan_name,
+            export_type="Word",
+            file_path=export_result.file_path,
+        )
+        return self.store.append_export_audit_log(audit_log)
 
 
 def _derive_product_fields(products: list[dict[str, Any]]) -> dict[str, Any]:
