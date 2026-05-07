@@ -94,7 +94,132 @@
 }
 ```
 
-## 3. 生成失败响应示例
+## 3. 历史版本、编辑、恢复与最终版
+
+### 数据结构
+
+当前项目仍采用框架无关服务和内存仓储，正文版本使用追加式 `PlanContentVersion` 保存，不覆盖历史 AI 输出。推荐落库表为 `overseas_plan_content_versions`：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 版本记录 ID。 |
+| `project_id` | string | 所属方案历史组 ID；重新生成项目通过 `metadata.plan_group_id` 归入同一历史组。 |
+| `source_project_id` | string | 产生该内容的具体生成项目 ID。 |
+| `version_number` | integer | 历史组内递增版本号。 |
+| `created_by` | string | 创建人，AI 生成/重新生成取发起用户，用户编辑取编辑人。 |
+| `created_at` | datetime | 版本创建时间，UTC ISO-8601。 |
+| `generation_source` | enum | `AI生成` / `用户编辑` / `重新生成`。 |
+| `change_summary` | string | 本次变化摘要，例如“AI生成完成”“用户编辑：正文内容调整”“恢复自历史版本 v1”。 |
+| `content_json` | object | 完整方案 JSON 正文，导出和预览都从这里取数。 |
+| `generation_status` | enum | 版本可用状态，默认 `completed`。 |
+| `is_final` | boolean | 是否最终版；同一历史组最多一个最终版。 |
+| `finalized_by` / `finalized_at` | string / datetime | 设置最终版的人和时间。 |
+
+`GenerationProject.metadata` 新增协作字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `plan_group_id` | 同一方案的历史组 ID；初次生成默认为项目 ID，重新生成沿用来源项目历史组。 |
+| `current_version_number` | 当前预览/编辑版本号。 |
+| `final_version_number` | 已设置的最终版版本号。 |
+| `export_version_number` | 导出时实际采用的版本号，仅写入导出上下文。 |
+
+### API 接口
+
+#### 编辑正文
+
+`PUT /api/overseas-plans/{project_id}/content`
+
+请求体：
+
+```json
+{
+  "edited_by": "user-1001",
+  "change_summary": "补充德国渠道策略",
+  "content_json": { "sections": {} }
+}
+```
+
+服务方法：`OverseasPlanGenerationService.update_generated_content()`。编辑会把当前方案正文更新为用户提交内容，并追加一个 `generation_source = 用户编辑` 的新版本。历史 AI 生成结果仅追加保存，不会被覆盖。
+
+#### 查看版本列表
+
+`GET /api/overseas-plans/{project_id}/versions`
+
+响应示例：
+
+```json
+{
+  "project_id": "ogp_2f5e...",
+  "current_version_number": 3,
+  "final_version_number": 2,
+  "versions": [
+    {
+      "version_number": 1,
+      "created_by": "user-1001",
+      "created_at": "2026-05-07T08:00:00+00:00",
+      "generation_source": "AI生成",
+      "change_summary": "AI生成完成",
+      "content_json": {},
+      "is_final": false
+    }
+  ]
+}
+```
+
+服务方法：`OverseasPlanGenerationService.list_versions()`。
+
+#### 查看单个历史版本
+
+`GET /api/overseas-plans/{project_id}/versions/{version_number}`
+
+服务方法：`OverseasPlanGenerationService.get_version()`。前端切换查看时使用该版本 `content_json` 进行只读预览。
+
+#### 恢复历史版本
+
+`POST /api/overseas-plans/{project_id}/versions/{version_number}/restore`
+
+请求体：
+
+```json
+{ "restored_by": "user-1001" }
+```
+
+服务方法：`OverseasPlanGenerationService.restore_version()`。恢复不会删除或改写原版本，而是把历史版本正文复制为当前正文，并追加一条 `generation_source = 用户编辑`、`change_summary = 恢复自历史版本 v{version_number}` 的新版本。
+
+#### 设置最终版
+
+`POST /api/overseas-plans/{project_id}/versions/{version_number}/final`
+
+请求体：
+
+```json
+{ "finalized_by": "user-1001" }
+```
+
+服务方法：`OverseasPlanGenerationService.mark_final_version()`。同一方案历史组只保留一个最终版标记，新设置会自动取消其他版本的 `is_final`。
+
+### 导出版本选择
+
+Word/PPT/Excel 导出服务统一调用 `_project_for_export()` 选择正文版本：
+
+1. 优先使用同一历史组内 `is_final = true` 且 `generation_status = completed` 的最终版；
+2. 如果没有最终版，使用版本号最大的 `completed` 版本；
+3. 如果历史组内暂无版本，则回退到当前 `GenerationProject.result`。
+
+### 前端交互说明
+
+方案预览页新增“版本记录”入口：
+
+1. 点击“查看版本记录”展开版本面板；
+2. 每条版本显示 `version_number`、生成/编辑时间、创建人、来源和变化摘要；
+3. 点击“切换查看”后，预览区展示该版本内容，历史版本以只读方式展示，避免误改历史记录；
+4. 点击“恢复为当前版本”调用恢复接口，后端追加恢复版本，前端刷新当前版本与版本列表；
+5. 点击“设为最终版”调用最终版接口，版本列表中展示“最终版”标记；
+6. 用户保存草稿/编辑内容时，前端提示“已写入版本记录”，后端保存为 `用户编辑` 版本；
+7. 导出按钮无需额外选择版本，默认遵循“最终版优先，否则最新完成版”。
+
+## 4. 生成失败响应示例
 
 ```json
 {
@@ -126,7 +251,7 @@
 }
 ```
 
-## 4. 状态说明
+## 5. 状态说明
 
 | 状态 | 说明 |
 | --- | --- |
@@ -135,7 +260,7 @@
 | `completed` | DeepSeek JSON 校验通过，方案已保存并可预览。 |
 | `failed` | 生成失败，`error_reason` 会保存失败原因，并写入审计日志。 |
 
-## 5. 导出 Word 方案
+## 6. 导出 Word 方案
 
 `POST /api/overseas-plans/{project_id}/exports/word`
 
@@ -216,7 +341,7 @@ print(result.file_path)
 ```
 
 
-## 6. 导出 Excel 行动计划/资源清单
+## 7. 导出 Excel 行动计划/资源清单
 
 可映射为两个业务接口：
 
@@ -340,7 +465,7 @@ result = service.export_excel(
 print(result.file_path)
 ```
 
-## 7. 导出 PPT 方案
+## 8. 导出 PPT 方案
 
 `POST /api/overseas-plans/{project_id}/exports/ppt`
 
