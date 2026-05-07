@@ -15,6 +15,7 @@ from .generation_service import (
     OverseasPlanGenerationService,
     PlanLLMClient,
 )
+from .excel_export_service import ExcelExportKind, ExcelExportRequest, ExcelExportResult
 from .ppt_export_service import PPTExportRequest, PPTExportResult
 from .word_export_service import WordExportRequest, WordExportResult
 
@@ -42,6 +43,9 @@ __all__ = [
     "InMemoryGenerationStore",
     "OverseasPlanGenerationService",
     "PlanLLMClient",
+    "ExcelExportKind",
+    "ExcelExportRequest",
+    "ExcelExportResult",
     "PPTExportRequest",
     "PPTExportResult",
     "WordExportRequest",

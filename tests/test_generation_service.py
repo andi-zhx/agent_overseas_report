@@ -310,3 +310,153 @@ def test_ppt_export_creates_pptx_and_writes_export_audit_log(tmp_path):
     assert audit.plan_name == "示例医疗科技出海解决方案"
     assert audit.export_type == "PPT"
     assert audit.file_path == export.file_path
+
+
+def test_excel_export_action_plan_creates_xlsx_and_writes_export_audit_log(tmp_path):
+    payload = json.dumps(
+        {
+            "sections": {
+                **REQUIRED_SECTIONS,
+                "07_12_24_month_implementation_roadmap": {
+                    "roadmap": [
+                        {
+                            "stage": "准入准备期",
+                            "time_range": "1-3个月",
+                            "core_goal": "完成准入与渠道长名单",
+                            "key_actions": ["认证复核", "渠道筛选"],
+                            "responsible_party": "海外业务部",
+                            "required_resources": ["认证顾问", "德语资料"],
+                            "deliverables": ["认证清单", "渠道长名单"],
+                            "priority": "高",
+                            "status": "待启动",
+                            "notes": "优先德国市场",
+                        }
+                    ]
+                },
+            }
+        },
+        ensure_ascii=False,
+    )
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+    generation = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    from agent_overseas_report.services import ExcelExportKind, ExcelExportRequest
+
+    export = service.export_excel(
+        ExcelExportRequest(
+            project_id=generation.project["id"],
+            exported_by="user-2",
+            export_kind=ExcelExportKind.ACTION_PLAN,
+            output_dir=tmp_path,
+        )
+    )
+
+    assert export.export_type == "Excel"
+    assert export.export_kind == "action_plan"
+    assert export.sheet_name == "12-24个月行动计划表"
+    assert export.file_path.endswith(".xlsx")
+    assert export.headers == ["阶段", "时间范围", "核心目标", "关键动作", "责任方", "所需资源", "交付物", "优先级", "状态", "备注"]
+    assert export.rows[0]["阶段"] == "准入准备期"
+    assert export.rows[0]["关键动作"] == "认证复核；渠道筛选"
+
+    import zipfile
+
+    with zipfile.ZipFile(export.file_path) as xlsx:
+        sheet_xml = xlsx.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        styles_xml = xlsx.read("xl/styles.xml").decode("utf-8")
+
+    assert "阶段" in sheet_xml
+    assert "准入准备期" in sheet_xml
+    assert "customWidth" in sheet_xml
+    assert "Microsoft YaHei" in styles_xml
+
+    updated_project = service.store.get_project(generation.project["id"])
+    assert updated_project.output_excel.file_path == export.file_path
+    assert updated_project.output_word is None
+    assert updated_project.output_ppt is None
+
+    [audit] = service.store.list_export_audit_logs(generation.project["id"])
+    assert audit.exported_by == "user-2"
+    assert audit.enterprise_id == "ent-1"
+    assert audit.enterprise_name == "示例医疗科技"
+    assert audit.plan_name == "示例医疗科技12-24个月行动计划表"
+    assert audit.export_type == "Excel"
+    assert audit.file_path == export.file_path
+
+
+def test_excel_export_resource_list_uses_placeholder_for_missing_resource_name(tmp_path):
+    payload = json.dumps(
+        {
+            "sections": {
+                **REQUIRED_SECTIONS,
+                "04_overseas_resource_matching_plan": {
+                    "resources": [
+                        {
+                            "resource_type": "渠道资源",
+                            "country_region": "德国",
+                            "suggested_contact": "医疗器械经销商负责人",
+                            "purpose": "验证本地渠道覆盖能力",
+                            "priority": "高",
+                            "stage": "准入准备期",
+                            "materials": ["英文产品手册", "CE证书"],
+                            "current_status": "待联系",
+                            "notes": "AI未给出具体机构名称",
+                        }
+                    ]
+                },
+            }
+        },
+        ensure_ascii=False,
+    )
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+    generation = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    from agent_overseas_report.services import ExcelExportRequest
+
+    export = service.export_excel(
+        ExcelExportRequest(
+            project_id=generation.project["id"],
+            exported_by="user-2",
+            export_kind="resource_list",
+            output_dir=tmp_path,
+        )
+    )
+
+    assert export.export_type == "Excel"
+    assert export.export_kind == "resource_list"
+    assert export.sheet_name == "海外资源对接清单"
+    assert export.headers == ["资源类型", "国家/地区", "资源名称", "建议对接对象", "对接目的", "优先级", "所属阶段", "需要准备的材料", "当前状态", "备注"]
+    assert export.rows[0]["资源名称"] == "待补充/需人工确认"
+    assert export.rows[0]["需要准备的材料"] == "英文产品手册；CE证书"
+
+    import zipfile
+
+    with zipfile.ZipFile(export.file_path) as xlsx:
+        sheet_xml = xlsx.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+    assert "待补充/需人工确认" in sheet_xml
+    assert "海外资源对接清单" not in sheet_xml  # sheet title is in workbook.xml; sheet cells remain pure data table.
+
+    updated_project = service.store.get_project(generation.project["id"])
+    assert updated_project.output_excel.file_path == export.file_path
+    [audit] = service.store.list_export_audit_logs(generation.project["id"])
+    assert audit.plan_name == "示例医疗科技海外资源对接清单"
+    assert audit.export_type == "Excel"

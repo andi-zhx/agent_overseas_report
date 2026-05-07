@@ -215,7 +215,132 @@ result = service.export_word(
 print(result.file_path)
 ```
 
-## 6. 导出 PPT 方案
+
+## 6. 导出 Excel 行动计划/资源清单
+
+可映射为两个业务接口：
+
+- `POST /api/overseas-plans/{project_id}/exports/excel-action-plan`：导出“12-24个月行动计划表”。
+- `POST /api/overseas-plans/{project_id}/exports/resource-list`：导出“海外资源对接清单”。
+
+当前代码提供框架无关服务方法 `OverseasPlanGenerationService.export_excel()`，API 层只需按接口路径传入对应 `export_kind`：`action_plan` 或 `resource_list`。导出只更新出海方案项目的 `output_excel.file_path` 和独立导出审计日志，不触碰现有企业/产品 Excel 导入导出模块。
+
+### 请求参数
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `exported_by` | string | 是 | 发起导出的用户 ID，用于审计日志记录“谁导出”。 |
+| `export_kind` | string | 是 | `action_plan` 表示 12-24个月行动计划表；`resource_list` 表示海外资源对接清单。 |
+| `output_dir` | string | 否 | Excel 文件保存根目录；默认 `/tmp/agent_overseas_report/exports/excel`。 |
+| `system_name` | string | 否 | 生成系统名称，默认“企业出海方案智能生成系统”。 |
+
+### 请求示例
+
+```json
+{
+  "exported_by": "user-1001",
+  "export_kind": "action_plan",
+  "output_dir": "/tmp/agent_overseas_report/exports/excel",
+  "system_name": "企业出海方案智能生成系统"
+}
+```
+
+### 成功响应示例
+
+```json
+{
+  "project_id": "ogp_2f5e...",
+  "plan_name": "示例医疗科技12-24个月行动计划表",
+  "export_type": "Excel",
+  "export_kind": "action_plan",
+  "sheet_name": "12-24个月行动计划表",
+  "file_path": "/tmp/agent_overseas_report/exports/excel/ogp_2f5e.../示例医疗科技12-24个月行动计划表_v1_20260507080000.xlsx",
+  "exported_by": "user-1001",
+  "exported_at": "2026-05-07T08:00:00Z",
+  "headers": ["阶段", "时间范围", "核心目标", "关键动作", "责任方", "所需资源", "交付物", "优先级", "状态", "备注"],
+  "rows": [
+    {
+      "阶段": "准入准备期",
+      "时间范围": "1-3个月",
+      "核心目标": "完成准入与渠道长名单",
+      "关键动作": "认证复核；渠道筛选",
+      "责任方": "海外业务部",
+      "所需资源": "认证顾问；德语资料",
+      "交付物": "认证清单；渠道长名单",
+      "优先级": "高",
+      "状态": "待启动",
+      "备注": "优先德国市场"
+    }
+  ]
+}
+```
+
+### Excel 导出结果结构
+
+#### 12-24个月行动计划表字段
+
+| 字段 | 来源说明 |
+| --- | --- |
+| 阶段 | 优先从方案 `sections.07_12_24_month_implementation_roadmap.roadmap[].stage/phase` 提取。 |
+| 时间范围 | 从 `time_range/timeframe/time/period` 等字段提取。 |
+| 核心目标 | 从 `core_goal/goal/target/objective` 等字段提取。 |
+| 关键动作 | 从 `key_actions/actions/action/tasks` 等字段提取；数组会以中文分号合并。 |
+| 责任方 | 从 `responsible_party/owner/department` 等字段提取。 |
+| 所需资源 | 从 `required_resources/resources/resource_needs` 等字段提取。 |
+| 交付物 | 从 `deliverables/deliverable/outputs` 等字段提取。 |
+| 优先级 | 从 `priority/priority_level` 提取。 |
+| 状态 | 从 `status/current_status` 提取。 |
+| 备注 | 从 `notes/remark/comment` 提取。 |
+
+#### 海外资源对接清单字段
+
+| 字段 | 来源说明 |
+| --- | --- |
+| 资源类型 | 从 `resource_type/type/category/subtype` 提取。 |
+| 国家/地区 | 从 `country_region/country_name/country/region/market` 提取。 |
+| 资源名称 | 从 `resource_name/name/organization/institution/company` 提取；如果 AI 结果没有具体名称，固定写入 `待补充/需人工确认`，不会编造。 |
+| 建议对接对象 | 从 `suggested_contact/contact/contact_name/target_contact/department` 提取。 |
+| 对接目的 | 从 `purpose/matching_purpose/objective/goal` 提取。 |
+| 优先级 | 从 `priority/priority_level` 提取。 |
+| 所属阶段 | 从 `stage/phase/related_stage` 提取。 |
+| 需要准备的材料 | 从 `materials/required_materials/preparation_materials/documents` 提取；数组会以中文分号合并。 |
+| 当前状态 | 从 `current_status/status` 提取。 |
+| 备注 | 从 `notes/remark/comment` 提取。 |
+
+### 文件路径
+
+默认保存到系统可访问路径：`/tmp/agent_overseas_report/exports/excel/{project_id}/{企业名称}{表名}_v{version}_{yyyyMMddHHmmss}.xlsx`。也可以通过 `output_dir` 指定其他可访问根目录。
+
+### 导出审计日志
+
+每次 Excel 导出都会写入独立导出审计日志，可通过 `InMemoryGenerationStore.list_export_audit_logs(project_id)` 查询，字段包括：
+
+| 字段 | 说明 |
+| --- | --- |
+| `exported_by` | 谁导出。 |
+| `exported_at` | 什么时候导出。 |
+| `enterprise_id` / `enterprise_name` | 哪个企业。 |
+| `project_id` / `version` / `plan_name` | 哪份方案。 |
+| `export_type` | 固定为 `Excel`。 |
+| `file_path` | 实际生成文件路径。 |
+
+### 本地服务调用示例
+
+```python
+from agent_overseas_report.services import ExcelExportKind, ExcelExportRequest
+
+result = service.export_excel(
+    ExcelExportRequest(
+        project_id="ogp_xxx",
+        exported_by="user-1001",
+        export_kind=ExcelExportKind.ACTION_PLAN,
+        output_dir="/tmp/agent_overseas_report/exports/excel",
+    )
+)
+print(result.file_path)
+```
+
+## 7. 导出 PPT 方案
 
 `POST /api/overseas-plans/{project_id}/exports/ppt`
 
