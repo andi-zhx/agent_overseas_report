@@ -214,3 +214,87 @@ result = service.export_word(
 )
 print(result.file_path)
 ```
+
+## 6. 导出 PPT 方案
+
+`POST /api/overseas-plans/{project_id}/exports/ppt`
+
+当前代码提供框架无关服务方法 `OverseasPlanGenerationService.export_ppt()`，API 层可直接映射为上述接口。PPT 导出只更新 `output_ppt` 字段和独立导出审计日志，不修改 `output_word`、`output_excel`，因此不会影响现有 Word/Excel 导出能力。
+
+### 请求参数
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `exported_by` | string | 是 | 发起导出的用户 ID，用于审计日志记录“谁导出”。 |
+| `output_dir` | string | 否 | PPT 文件保存根目录；默认 `/tmp/agent_overseas_report/exports/ppt`。 |
+| `system_name` | string | 否 | 封面展示的生成机构/系统名称，默认“企业出海方案智能生成系统”。 |
+
+### 请求示例
+
+```json
+{
+  "exported_by": "user-1001",
+  "output_dir": "/tmp/agent_overseas_report/exports/ppt",
+  "system_name": "企业出海方案智能生成系统"
+}
+```
+
+### 成功响应示例
+
+```json
+{
+  "project_id": "ogp_2f5e...",
+  "plan_name": "示例医疗科技出海解决方案",
+  "export_type": "PPT",
+  "file_path": "/tmp/agent_overseas_report/exports/ppt/ogp_2f5e.../示例医疗科技出海解决方案_v1_20260507080000.pptx",
+  "exported_by": "user-1001",
+  "exported_at": "2026-05-07T08:00:00Z"
+}
+```
+
+### PPT 内容结构
+
+导出 PPT 标题固定为《`{企业名称}出海解决方案`》，默认生成 12 页商务咨询风格宽屏演示稿：
+
+1. 封面：企业名称、所属行业、目标国家、生成日期。
+2. 方案总览：企业当前阶段、推荐目标市场、推荐进入模式、核心资源对接方向、12-24个月目标。
+3. 企业现状诊断：基础情况、产品竞争力、出海成熟度评分。
+4. 产品竞争力分析：技术壁垒、成本优势、交付能力、产品差异化、品牌能力。
+5. 海外市场选择逻辑：国家选择五维模型、一级/二级/长期市场。
+6. 国家优先级矩阵：用统一矩阵表格表达市场潜力、进入难度、推荐国家位置。
+7. 出海模式设计：经销代理、跨境电商、本地 KA、海外合资/办事处和分阶段进入路径。
+8. 海外资源对接方案：渠道、技术、供应链、政府/商协会资源。
+9. 展会与市场推广计划：推荐展会、推介会、采购对接会、海外获客漏斗。
+10. 投融资与扩产规划：初期、中期、后期资金与产能安排。
+11. 12-24个月实施路线图：1-3个月、3-6个月、6-9个月、9-12个月、12-24个月。
+12. 风险提示与下一步行动：主要风险、应对动作、近期执行清单。
+
+PPT 使用统一观点式页标题、商务蓝/浅灰配色、微软雅黑中文字体声明，并统一表格、矩阵和时间轴表格样式；文件写入系统可访问路径后，项目的 `output_ppt.file_path` 会保存该路径。
+
+### 导出审计日志
+
+每次 PPT 导出都会写入独立的导出审计日志，可通过 `InMemoryGenerationStore.list_export_audit_logs(project_id)` 查询，字段包括：
+
+| 字段 | 说明 |
+| --- | --- |
+| `exported_by` | 谁导出。 |
+| `exported_at` | 什么时候导出。 |
+| `enterprise_id` / `enterprise_name` | 哪个企业。 |
+| `project_id` / `version` / `plan_name` | 哪份方案。 |
+| `export_type` | 固定为 `PPT`。 |
+| `file_path` | 实际生成文件路径。 |
+
+### 本地服务调用示例
+
+```python
+from agent_overseas_report.services import PPTExportRequest
+
+result = service.export_ppt(
+    PPTExportRequest(
+        project_id="ogp_xxx",
+        exported_by="user-1001",
+        output_dir="/tmp/agent_overseas_report/exports/ppt",
+    )
+)
+print(result.file_path)
+```
