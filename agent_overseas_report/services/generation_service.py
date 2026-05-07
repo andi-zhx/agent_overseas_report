@@ -28,6 +28,7 @@ from agent_overseas_report.models import (
 from agent_overseas_report.models.overseas_generation import utc_now
 from agent_overseas_report.prompts import build_overseas_plan_prompts
 from agent_overseas_report.services.llm_service import LLMServiceError
+from agent_overseas_report.services.generation_readiness import assess_generation_readiness
 from agent_overseas_report.services.rule_engine import OverseasRuleEngine
 from agent_overseas_report.services.excel_export_service import ExcelExportRequest, ExcelExportResult, export_overseas_plan_excel
 from agent_overseas_report.services.ppt_export_service import PPTExportRequest, PPTExportResult, export_overseas_plan_ppt
@@ -84,6 +85,7 @@ class GenerationRequest:
     generated_by: str
     project_id: str | None = None
     extra_context: dict[str, Any] = field(default_factory=dict)
+    continue_on_validation_warning: bool = False
     username: str | None = None
     ip_address: str | None = None
     user_agent: str | None = None
@@ -421,6 +423,7 @@ class OverseasPlanGenerationService:
                 "extra_context": copy.deepcopy(request.extra_context),
                 "execution_mode": "inline_sync",
                 "plan_group_id": request.extra_context.get("plan_group_id") or request.project_id,
+                "continue_on_validation_warning": request.continue_on_validation_warning,
             },
         )
         project.metadata["plan_group_id"] = project.metadata.get("plan_group_id") or project.id
@@ -451,17 +454,26 @@ class OverseasPlanGenerationService:
         error_reason = None
         try:
             enterprise_data = self._load_enterprise_payload(project)
+            readiness_report = assess_generation_readiness(enterprise_data)
+            project.metadata["generation_readiness"] = readiness_report.to_dict()
+            if readiness_report.should_popup and not project.metadata.get("continue_on_validation_warning"):
+                raise GenerationValidationError(readiness_report.message)
             template_payload = self._load_templates(project, enterprise_data)
             rule_output = self.rule_engine.evaluate(enterprise_data) if self.rule_engine else {}
             prompt_bundle = build_overseas_plan_prompts(
-                enterprise_data={**enterprise_data, "templates": template_payload},
+                enterprise_data={**enterprise_data, "templates": template_payload, "generation_readiness": readiness_report.to_dict()},
                 rule_engine_output=rule_output,
                 resource_library=template_payload["resource_templates"],
-                extra_context={"project_id": project.id, "version": project.version, **project.metadata.get("extra_context", {})},
+                extra_context={"project_id": project.id, "version": project.version, "generation_readiness": readiness_report.to_dict(), **project.metadata.get("extra_context", {})},
             )
             raw_output = self.llm_client.generate_text(prompt_bundle.user_prompt, system_prompt=prompt_bundle.system_prompt)
             parsed_output = self._parse_validate_or_repair(raw_output, prompt_bundle, project, enterprise_data, rule_output)
 
+            if project.metadata.get("continue_on_validation_warning") and readiness_report.manual_review_required:
+                parsed_output.setdefault("data_quality_review", readiness_report.to_dict())
+                parsed_output.setdefault("global_manual_review_items", [])
+                if isinstance(parsed_output["global_manual_review_items"], list):
+                    parsed_output["global_manual_review_items"].append("因生成前信息缺失，方案需人工补充/复核")
             project.result = parsed_output
             maturity = rule_output.get("maturity_assessment", {})
             project.final_score = maturity.get("total_score")

@@ -9,18 +9,35 @@ export type Option = {
 
 export type ProductOption = Option & {
   enterpriseId: string;
+  category?: string;
+  hsCode?: string;
   certifications?: string[];
   capacity?: string;
   moq?: string;
+  leadTime?: string;
+  priceBand?: string;
+  exportSuitable?: boolean;
+  attachments?: string[];
 };
 
 export type EnterpriseProfile = Option & {
+  industry?: string;
+  mainBusiness?: string;
   mainProducts: string[];
+  annualRevenue?: string;
   currentMarkets: string[];
   exportRatio?: string;
   certifications?: string[];
   capacity?: string;
   moq?: string;
+  hasOverseasCustomers?: boolean;
+  teamInternationalization?: string;
+  capitalCapacity?: string;
+  targetChannels?: string[];
+  targetCustomerTypes?: string[];
+  planExhibition?: boolean;
+  needFinancing?: boolean;
+  overseasWarehouseOrFactory?: boolean;
   maturityScore?: number;
   maturityLevel?: string;
   missingFields?: string[];
@@ -64,11 +81,30 @@ export type PlanVersionRecord = {
   is_final?: boolean;
 };
 
+export type ReadinessStatus = "可生成" | "可生成但质量较低" | "不建议生成";
+
+export type MissingFieldCategory = {
+  category: "企业层面" | "产品层面" | "出海目标层面";
+  fields: string[];
+};
+
+export type GenerationReadiness = {
+  status: ReadinessStatus;
+  statusCode: "ready" | "low_quality" | "not_recommended";
+  message: string;
+  missingCategories: MissingFieldCategory[];
+  missingCount: number;
+  criticalMissingFields: string[];
+  shouldPopup: boolean;
+  manualReviewRequired: boolean;
+};
+
 export type GeneratedPlan = {
   projectId?: string;
   sections: EditableSections;
   countryMatrix: CountryMatrixItem[];
   roadmap: RoadmapItem[];
+  dataQualityReview?: GenerationReadiness;
   currentVersionNumber?: number;
   versions?: PlanVersionRecord[];
 };
@@ -78,6 +114,8 @@ export type GeneratePlanPayload = {
   productIds: string[];
   selectedIndustry: string;
   targetCountries: string[];
+  generationReadiness?: GenerationReadiness;
+  continueOnValidationWarning?: boolean;
 };
 
 export type ExportType = "word" | "ppt" | "excel" | "resources";
@@ -111,10 +149,21 @@ const defaultEnterprises: EnterpriseProfile[] = [
     name: "示例医疗科技有限公司",
     mainProducts: ["便携式检测仪", "智能监测终端"],
     currentMarkets: ["华东", "东南亚试单"],
+    industry: "医疗器械",
+    mainBusiness: "便携式检测和智能监测终端研发制造",
+    annualRevenue: "1.2亿元",
     exportRatio: "18%",
     certifications: ["CE", "ISO 13485"],
     capacity: "10,000台/月",
     moq: "50台",
+    hasOverseasCustomers: true,
+    teamInternationalization: "3名外贸/多语种成员",
+    capitalCapacity: "年度出海预算80万元",
+    targetChannels: ["经销商", "行业展会"],
+    targetCustomerTypes: ["区域代理商", "医疗机构"],
+    planExhibition: true,
+    needFinancing: false,
+    overseasWarehouseOrFactory: true,
     maturityScore: 76,
     maturityLevel: "全球化布局型",
     missingFields: ["目标国售后服务商", "英文案例视频"],
@@ -124,6 +173,8 @@ const defaultEnterprises: EnterpriseProfile[] = [
     name: "样例新能源装备有限公司",
     mainProducts: ["储能逆变器", "户用储能柜"],
     currentMarkets: ["国内", "中东询盘"],
+    industry: "新能源装备",
+    mainBusiness: "储能逆变器和户用储能柜研发生产",
     exportRatio: "8%",
     certifications: ["IEC"],
     capacity: "2,000套/月",
@@ -135,8 +186,8 @@ const defaultEnterprises: EnterpriseProfile[] = [
 ];
 
 const defaultProducts: ProductOption[] = [
-  { id: "prod-1", enterpriseId: "ent-1", name: "便携式检测仪", certifications: ["CE", "ISO 13485"], capacity: "10,000台/月", moq: "50台" },
-  { id: "prod-2", enterpriseId: "ent-1", name: "智能监测终端", certifications: ["CE"], capacity: "6,000台/月", moq: "100台" },
+  { id: "prod-1", enterpriseId: "ent-1", name: "便携式检测仪", category: "医疗检测设备", hsCode: "902780", certifications: ["CE", "ISO 13485"], capacity: "10,000台/月", moq: "50台", leadTime: "30天", priceBand: "USD 200-500", exportSuitable: true, attachments: ["英文说明书", "产品图片"] },
+  { id: "prod-2", enterpriseId: "ent-1", name: "智能监测终端", category: "智能硬件", hsCode: "901819", certifications: ["CE"], capacity: "6,000台/月", moq: "100台", leadTime: "35天", priceBand: "USD 100-300", exportSuitable: true, attachments: ["产品图片"] },
   { id: "prod-3", enterpriseId: "ent-2", name: "储能逆变器", certifications: ["IEC"], capacity: "2,000套/月", moq: "20套" },
 ];
 
@@ -225,6 +276,87 @@ const createLocalVersion = (
   };
 };
 
+
+const ENTERPRISE_REQUIRED_FIELDS: Array<{ label: string; isMissing: (enterprise: EnterpriseProfile | undefined, selectedIndustry: string) => boolean; critical?: boolean }> = [
+  { label: "企业名称", critical: true, isMissing: (enterprise) => !enterprise?.name?.trim() },
+  { label: "所属行业", critical: true, isMissing: (enterprise, selectedIndustry) => !selectedIndustry && !enterprise?.industry?.trim() },
+  { label: "主营业务", isMissing: (enterprise) => !enterprise?.mainBusiness?.trim() && (enterprise?.mainProducts.length ?? 0) === 0 },
+  { label: "年营收", isMissing: (enterprise) => !enterprise?.annualRevenue?.trim() },
+  { label: "当前市场", isMissing: (enterprise) => (enterprise?.currentMarkets.length ?? 0) === 0 },
+  { label: "出口占比", isMissing: (enterprise) => !enterprise?.exportRatio?.trim() },
+  { label: "工厂产能", isMissing: (enterprise) => !enterprise?.capacity?.trim() },
+  { label: "是否已有海外客户", isMissing: (enterprise) => enterprise?.hasOverseasCustomers === undefined },
+  { label: "团队国际化能力", isMissing: (enterprise) => !enterprise?.teamInternationalization?.trim() },
+  { label: "资金能力", isMissing: (enterprise) => !enterprise?.capitalCapacity?.trim() },
+];
+
+const PRODUCT_REQUIRED_FIELDS: Array<{ label: string; isMissing: (product: ProductOption) => boolean; critical?: boolean }> = [
+  { label: "产品名称", critical: true, isMissing: (product) => !product.name?.trim() },
+  { label: "产品类别", isMissing: (product) => !product.category?.trim() },
+  { label: "HS编码", isMissing: (product) => !product.hsCode?.trim() },
+  { label: "认证情况", isMissing: (product) => (product.certifications?.length ?? 0) === 0 },
+  { label: "MOQ", isMissing: (product) => !product.moq?.trim() },
+  { label: "交期", isMissing: (product) => !product.leadTime?.trim() },
+  { label: "价格带", isMissing: (product) => !product.priceBand?.trim() },
+  { label: "产能", isMissing: (product) => !product.capacity?.trim() },
+  { label: "是否适合出口", isMissing: (product) => product.exportSuitable === undefined },
+  { label: "产品图片/资料附件", isMissing: (product) => (product.attachments?.length ?? 0) === 0 },
+];
+
+const TARGET_REQUIRED_FIELDS: Array<{ label: string; isMissing: (enterprise: EnterpriseProfile | undefined, targetCountries: string[]) => boolean; critical?: boolean }> = [
+  { label: "目标国家", critical: true, isMissing: (_enterprise, targetCountries) => targetCountries.length === 0 },
+  { label: "目标渠道", isMissing: (enterprise) => (enterprise?.targetChannels?.length ?? 0) === 0 },
+  { label: "目标客户类型", isMissing: (enterprise) => (enterprise?.targetCustomerTypes?.length ?? 0) === 0 },
+  { label: "是否计划参展", isMissing: (enterprise) => enterprise?.planExhibition === undefined },
+  { label: "是否需要融资", isMissing: (enterprise) => enterprise?.needFinancing === undefined },
+  { label: "是否考虑海外仓/海外工厂", isMissing: (enterprise) => enterprise?.overseasWarehouseOrFactory === undefined },
+];
+
+const assessFrontendReadiness = (
+  enterprise: EnterpriseProfile | undefined,
+  selectedProducts: ProductOption[],
+  selectedIndustry: string,
+  targetCountries: string[],
+): GenerationReadiness => {
+  const enterpriseMissing = ENTERPRISE_REQUIRED_FIELDS.filter((field) => field.isMissing(enterprise, selectedIndustry)).map((field) => field.label);
+  const productMissing = selectedProducts.length === 0
+    ? PRODUCT_REQUIRED_FIELDS.map((field) => field.label)
+    : PRODUCT_REQUIRED_FIELDS.filter((field) => selectedProducts.some((product) => field.isMissing(product))).map((field) => field.label);
+  const targetMissing = TARGET_REQUIRED_FIELDS.filter((field) => field.isMissing(enterprise, targetCountries)).map((field) => field.label);
+  const missingCategories = [
+    { category: "企业层面" as const, fields: enterpriseMissing },
+    { category: "产品层面" as const, fields: productMissing },
+    { category: "出海目标层面" as const, fields: targetMissing },
+  ].filter((category) => category.fields.length > 0);
+  const missingCount = missingCategories.reduce((total, category) => total + category.fields.length, 0);
+  const criticalMissingFields = [
+    ...ENTERPRISE_REQUIRED_FIELDS.filter((field) => field.critical && field.isMissing(enterprise, selectedIndustry)).map((field) => field.label),
+    ...PRODUCT_REQUIRED_FIELDS.filter((field) => field.critical && (selectedProducts.length === 0 || selectedProducts.some((product) => field.isMissing(product)))).map((field) => field.label),
+    ...TARGET_REQUIRED_FIELDS.filter((field) => field.critical && field.isMissing(enterprise, targetCountries)).map((field) => field.label),
+  ];
+
+  const status: ReadinessStatus = criticalMissingFields.length > 0
+    ? "不建议生成"
+    : missingCount >= 10
+      ? "可生成但质量较低"
+      : "可生成";
+
+  return {
+    status,
+    statusCode: status === "可生成" ? "ready" : status === "可生成但质量较低" ? "low_quality" : "not_recommended",
+    message: status === "不建议生成"
+      ? "基础字段缺失较严重，不建议直接生成；如继续生成，方案将标记需人工补充/复核。"
+      : status === "可生成但质量较低"
+        ? "可以生成，但关键字段缺失会降低方案质量。"
+        : "信息基本完整，可生成方案。",
+    missingCategories,
+    missingCount,
+    criticalMissingFields,
+    shouldPopup: status === "不建议生成",
+    manualReviewRequired: missingCount > 0,
+  };
+};
+
 const ensureVersionHistory = (plan: GeneratedPlan, createdBy: string, generationSource: GenerationSource): GeneratedPlan => {
   if (plan.versions?.length) {
     return {
@@ -261,6 +393,7 @@ export default function OverseasPlanWorkbench({
   const [notice, setNotice] = useState("");
   const [showVersionPanel, setShowVersionPanel] = useState(false);
   const [previewVersionNumber, setPreviewVersionNumber] = useState<number | null>(null);
+  const [pendingSevereReadiness, setPendingSevereReadiness] = useState<GenerationReadiness | null>(null);
 
   const selectedEnterprise = enterprises.find((enterprise) => enterprise.id === enterpriseId);
   const availableProducts = useMemo(
@@ -271,20 +404,15 @@ export default function OverseasPlanWorkbench({
   const selectedCountryNames = countries
     .filter((country) => targetCountryIds.includes(country.id))
     .map((country) => country.name);
-
-  const missingWarnings = [
-    !enterpriseId ? "请选择企业" : "",
-    productIds.length === 0 ? "请选择至少一个产品" : "",
-    !industryId ? "请选择行业" : "",
-    targetCountryIds.length === 0 ? "请选择至少一个目标国家" : "",
-    ...(selectedEnterprise?.missingFields ?? []),
-  ].filter(Boolean);
+  const selectedProducts = availableProducts.filter((product) => productIds.includes(product.id));
+  const readiness = assessFrontendReadiness(selectedEnterprise, selectedProducts, selectedIndustry, selectedCountryNames);
 
   const payload: GeneratePlanPayload = {
     enterpriseId,
     productIds,
     selectedIndustry,
     targetCountries: selectedCountryNames,
+    generationReadiness: readiness,
   };
 
   const toggleProduct = (productId: string) => {
@@ -299,27 +427,36 @@ export default function OverseasPlanWorkbench({
     );
   };
 
-  const handleGenerate = async () => {
-    setError("");
-    setNotice("");
-    if (!enterpriseId || productIds.length === 0 || !industryId || targetCountryIds.length === 0) {
-      setError("信息不完整，请先补充企业、产品、行业和目标国家后再生成方案。");
-      return;
-    }
-
+  const runGenerate = async (continueOnValidationWarning = false) => {
     setLoading(true);
     try {
-      const nextPlan = onGenerate ? await onGenerate(payload) : await new Promise<GeneratedPlan>((resolve) => {
-        window.setTimeout(() => resolve(buildPreviewPlan(selectedEnterprise, selectedCountryNames)), 700);
+      const generationPayload = { ...payload, continueOnValidationWarning };
+      const nextPlan = onGenerate ? await onGenerate(generationPayload) : await new Promise<GeneratedPlan>((resolve) => {
+        window.setTimeout(() => resolve({ ...buildPreviewPlan(selectedEnterprise, selectedCountryNames), dataQualityReview: readiness }), 700);
       });
       setPlan(ensureVersionHistory(nextPlan, currentUserId, "AI生成"));
       setPreviewVersionNumber(nextPlan.currentVersionNumber ?? nextPlan.versions?.[nextPlan.versions.length - 1]?.version_number ?? null);
-      setNotice("方案已生成，可在预览区编辑后导出，也可进入版本记录查看历史。");
+      setNotice(continueOnValidationWarning || readiness.manualReviewRequired ? "方案已生成，并已标记需人工补充/复核。" : "方案已生成，可在预览区编辑后导出，也可进入版本记录查看历史。");
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : "方案生成失败，请稍后重试。");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGenerate = async () => {
+    setError("");
+    setNotice("");
+    if (readiness.shouldPopup) {
+      setPendingSevereReadiness(readiness);
+      return;
+    }
+    await runGenerate(false);
+  };
+
+  const handleContinueGenerate = async () => {
+    setPendingSevereReadiness(null);
+    await runGenerate(true);
   };
 
   const handleSaveDraft = async () => {
@@ -460,10 +597,23 @@ export default function OverseasPlanWorkbench({
 
       {error && <div className="alert alert--error">{error}</div>}
       {notice && <div className="alert alert--success">{notice}</div>}
-      {missingWarnings.length > 0 && (
-        <div className="alert alert--warning">
-          <strong>信息缺失提醒：</strong>{missingWarnings.join("；")}
-        </div>
+      {readiness.missingCategories.length > 0 && (
+        <section className="readiness-card" aria-label="生成前缺失信息提醒">
+          <div className={`readiness-card__status readiness-card__status--${readiness.statusCode}`}>
+            <strong>{readiness.status}</strong>
+            <span>{readiness.message}</span>
+          </div>
+          <div className="missing-groups">
+            {readiness.missingCategories.map((category) => (
+              <article className="missing-group" key={category.category}>
+                <h3>{category.category}</h3>
+                <div className="missing-tags">
+                  {category.fields.map((field) => <span key={field}>{field}</span>)}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
 
       <section className="diagnosis-card">
@@ -569,6 +719,31 @@ export default function OverseasPlanWorkbench({
           {visiblePlan.roadmap.length === 0 && <div className="empty-state">生成方案后展示分阶段路线图。</div>}
         </div>
       </section>
+
+      {pendingSevereReadiness && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="validation-modal" role="dialog" aria-modal="true" aria-label="缺失信息严重提示">
+            <p className="card-label">生成前校验</p>
+            <h2>{pendingSevereReadiness.status}</h2>
+            <p>{pendingSevereReadiness.message}</p>
+            <div className="missing-groups missing-groups--modal">
+              {pendingSevereReadiness.missingCategories.map((category) => (
+                <article className="missing-group" key={category.category}>
+                  <h3>{category.category}</h3>
+                  <div className="missing-tags">
+                    {category.fields.map((field) => <span key={field}>{field}</span>)}
+                  </div>
+                </article>
+              ))}
+            </div>
+            <p className="validation-modal__hint">继续生成后，系统会将方案标记为“需人工补充/复核”，并要求AI不要编造缺失信息。</p>
+            <div className="validation-modal__actions">
+              <button type="button" className="button button--secondary" onClick={() => setPendingSevereReadiness(null)}>返回补充</button>
+              <button type="button" className="button button--primary" onClick={handleContinueGenerate}>继续生成</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {loading && <div className="loading-mask" role="status">AI正在生成方案，请稍候...</div>}
       <input type="hidden" value={currentUserId} readOnly />
