@@ -149,3 +149,82 @@ def test_regenerate_creates_new_version_without_overwriting_history():
     assert second.project["version"] == 2
     assert second.project["metadata"]["extra_context"]["regenerated_from_project_id"] == first.project["id"]
     assert len(service.store.list_audit_logs()) == 2
+
+
+def test_word_export_creates_docx_and_writes_export_audit_log(tmp_path):
+    payload = json.dumps(
+        {
+            "sections": {
+                **REQUIRED_SECTIONS,
+                "08_risk_warnings_and_next_steps": {
+                    "next_action_checklist": ["确认德国渠道名单", "启动CE认证复核"],
+                    "risk_warnings": [{"type": "policy", "description": "关注欧盟医疗器械法规变化"}],
+                },
+            },
+            "country_priority_matrix": [
+                {
+                    "country_name": "德国",
+                    "priority_rank": 1,
+                    "total_score": 88,
+                    "recommended_entry_mode": "经销代理+展会获客",
+                    "key_opportunities": ["医疗器械需求稳定"],
+                    "key_risks": ["认证周期较长"],
+                }
+            ],
+            "implementation_roadmap_12_24_months": [
+                {
+                    "time": "0-6个月",
+                    "goal": "完成准入准备",
+                    "actions": ["认证复核", "渠道筛选"],
+                    "owner": "海外业务部",
+                    "deliverables": ["认证清单", "渠道长名单"],
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+    generation = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    from agent_overseas_report.services import WordExportRequest
+
+    export = service.export_word(
+        WordExportRequest(project_id=generation.project["id"], exported_by="user-2", output_dir=tmp_path)
+    )
+
+    assert export.export_type == "Word"
+    assert export.plan_name == "示例医疗科技企业出海解决方案"
+    assert export.file_path.endswith(".docx")
+    assert (tmp_path / generation.project["id"]).exists()
+
+    import zipfile
+
+    with zipfile.ZipFile(export.file_path) as docx:
+        document_xml = docx.read("word/document.xml").decode("utf-8")
+
+    assert "《示例医疗科技企业出海解决方案》" in document_xml
+    assert "01 企业现状诊断" in document_xml
+    assert "08 风险提示与下一步建议" in document_xml
+    assert "国家优先级矩阵表" in document_xml
+    assert "12-24个月实施路线图" in document_xml
+
+    updated_project = service.store.get_project(generation.project["id"])
+    assert updated_project.output_word.file_path == export.file_path
+    assert updated_project.output_excel is None
+
+    [audit] = service.store.list_export_audit_logs(generation.project["id"])
+    assert audit.exported_by == "user-2"
+    assert audit.enterprise_id == "ent-1"
+    assert audit.enterprise_name == "示例医疗科技"
+    assert audit.plan_name == "示例医疗科技企业出海解决方案"
+    assert audit.export_type == "Word"
+    assert audit.file_path == export.file_path
