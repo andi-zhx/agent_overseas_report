@@ -230,11 +230,14 @@ class GenerationProject:
 
 
 def infer_maturity_level(total_score: float) -> MaturityLevel:
-    """根据 100 分制总分推断企业出海成熟度分级。"""
+    """根据 100 分制总分推断企业出海成熟度分级。
 
-    if total_score >= 80:
+    分级口径：0-40 为初级出海型，41-75 为增长型，76-100 为全球化布局型。
+    """
+
+    if total_score >= 76:
         return MaturityLevel.GLOBAL_LAYOUT
-    if total_score >= 60:
+    if total_score >= 41:
         return MaturityLevel.GROWTH
     return MaturityLevel.BEGINNER
 
