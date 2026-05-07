@@ -1,0 +1,98 @@
+[
+  {
+    "industry_name": "建材",
+    "typical_products": ["瓷砖", "卫浴五金", "门窗型材", "防水材料"],
+    "suitable_regions": ["中东", "东南亚", "北美", "欧洲"],
+    "common_entry_modes": ["本地经销商", "工程项目代理", "海外仓备货", "建材展会获客"],
+    "key_certifications": ["CE", "SASO", "UL", "绿色建材认证"],
+    "pricing_logic": "以出厂价为基础叠加海运、关税、认证、渠道毛利和项目账期成本，区分工程价与零售价。",
+    "common_channels": ["建材批发市场", "工程承包商", "设计师渠道", "DIY/家居卖场"],
+    "common_trade_shows": ["Big 5 Global", "Coverings", "BAU", "IndoBuildTech"],
+    "major_risks": ["项目回款周期长", "本地标准差异", "运输破损", "低价竞争"],
+    "recommended_strategy": "优先选择基建和地产活跃市场，以样板工程和本地经销网络切入，逐步建立仓储和售后能力。"
+  },
+  {
+    "industry_name": "医疗器械",
+    "typical_products": ["诊断设备", "耗材", "康复器械", "家用监测设备"],
+    "suitable_regions": ["中东", "东南亚", "北美", "欧洲"],
+    "common_entry_modes": ["注册持证代理", "医院渠道合作", "政府采购", "本地服务商联合投标"],
+    "key_certifications": ["ISO 13485", "CE MDR", "FDA 510(k)", "MDSAP", "当地医疗器械注册"],
+    "pricing_logic": "以合规注册、临床支持、售后服务和招投标折扣为核心成本项，按渠道层级设置建议终端价。",
+    "common_channels": ["医疗器械经销商", "医院采购", "诊所网络", "康复中心"],
+    "common_trade_shows": ["Arab Health", "MEDICA", "FIME", "Medical Fair Asia"],
+    "major_risks": ["注册周期长", "合规责任高", "售后响应要求高", "招投标不确定性"],
+    "recommended_strategy": "先锁定法规路径清晰的单品，与持证代理和临床意见领袖合作，完成注册后再扩大医院和政府采购渠道。"
+  },
+  {
+    "industry_name": "消费品",
+    "typical_products": ["个护用品", "小家电", "母婴用品", "文创礼品"],
+    "suitable_regions": ["东南亚", "中东", "北美", "拉美"],
+    "common_entry_modes": ["跨境电商", "本地分销", "社媒种草", "KA 零售"],
+    "key_certifications": ["RoHS", "FCC", "CE", "标签合规", "当地消费品安全要求"],
+    "pricing_logic": "按平台佣金、履约费、退货率、广告投放和本地分销毛利倒推零售价与促销价。",
+    "common_channels": ["Amazon", "Shopee", "Lazada", "TikTok Shop", "商超/专卖店"],
+    "common_trade_shows": ["Canton Fair", "Global Sources", "Ambiente", "Cosmoprof"],
+    "major_risks": ["品牌认知低", "广告成本波动", "平台政策变化", "侵权与合规投诉"],
+    "recommended_strategy": "以电商和社媒验证爆品，再导入本地分销和零售渠道，建立多语言内容与售后闭环。"
+  },
+  {
+    "industry_name": "工业设备",
+    "typical_products": ["自动化设备", "包装机械", "数控设备", "泵阀与压缩机"],
+    "suitable_regions": ["东南亚", "中东", "北美", "欧洲", "拉美"],
+    "common_entry_modes": ["代理商销售", "系统集成商合作", "本地售后服务站", "行业展会获客"],
+    "key_certifications": ["CE Machinery", "UL", "ISO 9001", "当地安全标准"],
+    "pricing_logic": "以设备本体、运输安装、备件、培训、保修和本地服务费构成项目报价，支持租赁或分期方案。",
+    "common_channels": ["设备代理商", "系统集成商", "终端工厂直销", "工程公司"],
+    "common_trade_shows": ["Hannover Messe", "IMTS", "METALEX", "The Big 5 Heavy"],
+    "major_risks": ["售后半径过大", "安装调试复杂", "备件供应慢", "技术壁垒和认证要求"],
+    "recommended_strategy": "优先布局制造业转移或基建投资市场，选择具备服务能力的代理商并建立备件包和远程诊断流程。"
+  },
+  {
+    "industry_name": "纺织服装",
+    "typical_products": ["成衣", "功能面料", "家纺", "鞋帽配饰"],
+    "suitable_regions": ["东南亚", "中东", "欧洲", "北美"],
+    "common_entry_modes": ["品牌批发", "OEM/ODM", "跨境电商", "买手店合作"],
+    "key_certifications": ["OEKO-TEX", "GOTS", "BSCI", "GRS", "标签与成分合规"],
+    "pricing_logic": "按面辅料、加工、认证、物流、库存周转和季节折扣核算，区分 ODM、批发和零售价格带。",
+    "common_channels": ["服装批发商", "品牌商", "电商平台", "买手店", "连锁零售"],
+    "common_trade_shows": ["Texworld", "Magic Las Vegas", "Première Vision", "Intertextile"],
+    "major_risks": ["季节库存", "尺码版型不适配", "劳工与可持续审计", "快反供应链压力"],
+    "recommended_strategy": "以小单快反和可持续材料作为差异化，先服务区域品牌和电商卖家，再建设本地 showroom。"
+  },
+  {
+    "industry_name": "食品及农产品",
+    "typical_products": ["休闲食品", "调味品", "冷冻食品", "特色农产品"],
+    "suitable_regions": ["东南亚", "中东", "北美", "欧洲"],
+    "common_entry_modes": ["进口商/经销商", "华人超市", "本地商超", "餐饮供应链"],
+    "key_certifications": ["HACCP", "ISO 22000", "Halal", "FDA Food Facility Registration", "有机认证"],
+    "pricing_logic": "以保质期、冷链/常温物流、损耗、进口税费和渠道陈列费为关键变量，按箱规和促销周期定价。",
+    "common_channels": ["食品进口商", "商超", "餐饮渠道", "电商生鲜/食品平台"],
+    "common_trade_shows": ["Gulfood", "SIAL", "Anuga", "Thaifex Anuga Asia"],
+    "major_risks": ["食品准入限制", "标签语言合规", "保质期与冷链风险", "口味本地化不足"],
+    "recommended_strategy": "先选择合规门槛可控且华人/亚洲消费基础较强市场，完成标签和清关验证后扩展主流商超。"
+  },
+  {
+    "industry_name": "电子产品",
+    "typical_products": ["消费电子", "智能硬件", "电子元器件", "储能配件"],
+    "suitable_regions": ["东南亚", "北美", "欧洲", "中东"],
+    "common_entry_modes": ["跨境电商", "本地分销", "运营商/集成商合作", "品牌代理"],
+    "key_certifications": ["CE", "FCC", "RoHS", "REACH", "WEEE", "当地无线电认证"],
+    "pricing_logic": "按 BOM、认证摊销、平台佣金、保修退换、渠道返点和汇率波动设置价格，预留升级迭代空间。",
+    "common_channels": ["电商平台", "电子产品零售商", "分销商", "系统集成商"],
+    "common_trade_shows": ["CES", "IFA", "Gitex Global", "Hong Kong Electronics Fair"],
+    "major_risks": ["认证和专利风险", "售后退换率", "产品迭代快", "数据安全与隐私合规"],
+    "recommended_strategy": "以合规认证和差异化功能为前置条件，通过电商测试需求，再进入本地零售和集成商渠道。"
+  },
+  {
+    "industry_name": "家居用品",
+    "typical_products": ["家具", "收纳用品", "厨卫用品", "家居装饰"],
+    "suitable_regions": ["北美", "欧洲", "中东", "东南亚"],
+    "common_entry_modes": ["电商平台", "本地进口商", "家居卖场", "设计师/工程渠道"],
+    "key_certifications": ["FSC", "CARB/EPA TSCA Title VI", "CE", "阻燃/安全测试"],
+    "pricing_logic": "以材质、体积重量、海外仓成本、退货损耗和零售陈列费用为核心，按套系和 SKU 组合定价。",
+    "common_channels": ["Amazon Wayfair", "家居卖场", "进口批发商", "室内设计公司"],
+    "common_trade_shows": ["High Point Market", "Maison&Objet", "Ambiente", "INDEX Dubai"],
+    "major_risks": ["大件物流成本高", "环保与安全标准", "库存占用", "本地审美差异"],
+    "recommended_strategy": "优先选择可扁平化包装和标准化 SKU，通过海外仓和内容营销提升履约体验，再拓展线下样板间。"
+  }
+]
