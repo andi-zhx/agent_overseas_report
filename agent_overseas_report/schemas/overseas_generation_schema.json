@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-overseas-report.local/schemas/overseas-generation.schema.json",
+  "title": "企业出海方案生成结构化结果",
+  "description": "当前项目尚未引入数据库迁移机制；该 Schema 用作本地 JSON 持久化、API 响应和后续数据库建模的统一契约。新增结构仅通过 enterprise_id 和 product_ids 弱关联企业/产品数据，不修改既有表结构。",
+  "type": "object",
+  "required": [
+    "id",
+    "enterprise_id",
+    "product_ids",
+    "selected_industry",
+    "target_countries",
+    "generation_status",
+    "created_at",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "id": {"type": "string", "description": "出海方案生成项目 ID。"},
+    "enterprise_id": {"type": "string", "description": "关联企业 ID，仅保存弱关联，不修改企业表。"},
+    "product_ids": {"type": "array", "items": {"type": "string"}, "description": "关联产品 ID 列表，仅保存弱关联，不修改产品表。"},
+    "selected_industry": {"type": "string", "description": "本次生成选择的行业。"},
+    "target_countries": {"type": "array", "items": {"type": "string"}, "description": "候选或目标国家/地区代码列表。"},
+    "generation_status": {"type": "string", "enum": ["draft", "pending", "generating", "completed", "failed", "cancelled"], "description": "生成任务状态。"},
+    "generated_by": {"type": ["string", "null"], "description": "发起生成的用户或系统账号 ID。"},
+    "created_at": {"type": "string", "format": "date-time", "description": "创建时间。"},
+    "updated_at": {"type": "string", "format": "date-time", "description": "更新时间。"},
+    "version": {"type": "integer", "minimum": 1, "description": "方案版本号，支持同一企业多轮生成。"},
+    "final_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100, "description": "最终综合得分。"},
+    "maturity_level": {"type": ["string", "null"], "enum": ["初级出海型", "增长型", "全球化布局型", null], "description": "企业出海成熟度分级。"},
+    "output_word": {"$ref": "#/$defs/generated_file_ref"},
+    "output_ppt": {"$ref": "#/$defs/generated_file_ref"},
+    "output_excel": {"$ref": "#/$defs/generated_file_ref"},
+    "result": {"$ref": "#/$defs/generation_result"},
+    "metadata": {"type": "object", "description": "扩展字段，用于保存模型版本、提示词版本、运行参数等。"}
+  },
+  "$defs": {
+    "generated_file_ref": {
+      "type": ["object", "null"],
+      "description": "生成文件引用，兼容 URL 和本地/对象存储路径。",
+      "properties": {
+        "url": {"type": ["string", "null"]},
+        "file_path": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "maturity_dimension_score": {
+      "type": "object",
+      "required": ["dimension", "score", "max_score"],
+      "properties": {
+        "dimension": {"type": "string", "enum": ["product_internationalization", "overseas_channel_foundation", "english_material_completeness", "certification_status", "supply_chain_stability", "team_internationalization", "capital_capacity"]},
+        "score": {"type": "number", "minimum": 0},
+        "max_score": {"type": "integer", "enum": [20, 10, 15]},
+        "comment": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      },
+      "description": "企业出海成熟度单项评分：20/20/10/15/15/10/10，总分 100。"
+    },
+    "maturity_assessment": {
+      "type": "object",
+      "required": ["total_score", "maturity_level", "dimension_scores"],
+      "properties": {
+        "total_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "maturity_level": {"type": "string", "enum": ["初级出海型", "增长型", "全球化布局型"]},
+        "dimension_scores": {"type": "array", "items": {"$ref": "#/$defs/maturity_dimension_score"}},
+        "summary": {"type": ["string", "null"]},
+        "improvement_suggestions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "country_dimension_score": {
+      "type": "object",
+      "required": ["dimension", "score", "max_score"],
+      "properties": {
+        "dimension": {"type": "string", "enum": ["market_demand", "policy_environment", "competitive_environment", "channel_maturity", "supply_chain_fit"]},
+        "score": {"type": "number", "minimum": 0},
+        "max_score": {"type": "integer", "default": 100},
+        "rationale": {"type": ["string", "null"]}
+      },
+      "description": "国家选择五维模型评分。"
+    },
+    "country_priority_matrix_item": {
+      "type": "object",
+      "required": ["country_code", "country_name", "priority_rank", "total_score", "dimension_scores"],
+      "properties": {
+        "country_code": {"type": "string"},
+        "country_name": {"type": "string"},
+        "priority_rank": {"type": "integer", "minimum": 1},
+        "total_score": {"type": "number", "minimum": 0},
+        "dimension_scores": {"type": "array", "items": {"$ref": "#/$defs/country_dimension_score"}},
+        "recommended_entry_mode": {"type": ["string", "null"]},
+        "key_opportunities": {"type": "array", "items": {"type": "string"}},
+        "key_risks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "overseas_resource": {
+      "type": "object",
+      "required": ["id", "name", "category", "subtype"],
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "category": {"type": "string", "enum": ["channel", "technology", "supply_chain", "government_institution", "exhibition"]},
+        "subtype": {"type": "string", "enum": ["distributor", "agent", "ka_channel", "ecommerce_platform", "local_tech_partner", "testing_certification", "rd_collaborator", "overseas_warehouse", "logistics", "manufacturing_partner", "business_association", "industrial_park", "trade_promotion_agency", "investment_promotion_agency", "international_exhibition", "industry_exhibition", "promotion_event", "procurement_matchmaking"]},
+        "country_code": {"type": ["string", "null"]},
+        "country_name": {"type": ["string", "null"]},
+        "region": {"type": ["string", "null"]},
+        "contact_name": {"type": ["string", "null"]},
+        "contact_email": {"type": ["string", "null"]},
+        "contact_phone": {"type": ["string", "null"]},
+        "website_url": {"type": ["string", "null"]},
+        "capability_tags": {"type": "array", "items": {"type": "string"}},
+        "matched_product_ids": {"type": "array", "items": {"type": "string"}},
+        "match_score": {"type": ["number", "null"], "minimum": 0},
+        "notes": {"type": ["string", "null"]},
+        "source": {"type": ["string", "null"]},
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      },
+      "description": "资源库对象，覆盖渠道、技术、供应链、政府/机构、展会资源。"
+    },
+    "generation_result": {
+      "type": ["object", "null"],
+      "description": "生成结果对象，保存出海方案正文的结构化章节。",
+      "properties": {
+        "enterprise_diagnosis": {"type": "object", "description": "企业现状诊断。"},
+        "product_competitiveness_analysis": {"type": "object", "description": "产品竞争力分析。"},
+        "maturity_assessment": {"$ref": "#/$defs/maturity_assessment"},
+        "recommended_target_countries": {"type": "array", "items": {"type": "string"}, "description": "推荐目标国家。"},
+        "country_priority_matrix": {"type": "array", "items": {"$ref": "#/$defs/country_priority_matrix_item"}, "description": "国家优先级矩阵数据。"},
+        "recommended_entry_modes": {"type": "array", "items": {"type": "object"}, "description": "推荐进入模式。"},
+        "channel_path_design": {"type": "array", "items": {"type": "object"}, "description": "渠道路径设计。"},
+        "overseas_resource_matches": {"type": "array", "items": {"$ref": "#/$defs/overseas_resource"}, "description": "海外资源对接清单。"},
+        "exhibition_and_marketing_plan": {"type": "array", "items": {"type": "object"}, "description": "展会与市场推广计划。"},
+        "financing_and_capacity_plan": {"type": "object", "description": "投融资与扩产规划。"},
+        "implementation_roadmap_12_24_months": {"type": "array", "items": {"type": "object"}, "description": "12-24 个月实施路线图。"},
+        "risk_warnings": {"type": "array", "items": {"type": "object"}, "description": "风险提示。"},
+        "next_action_suggestions": {"type": "array", "items": {"type": "string"}, "description": "下一步行动建议。"},
+        "raw_payload": {"type": "object", "description": "原始生成载荷或模型返回扩展信息。"}
+      }
+    }
+  }
+}
