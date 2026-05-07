@@ -616,3 +616,123 @@ logs = service.list_plan_audit_logs(
 ```
 
 支持筛选条件：企业 `enterprise_id`、用户 `user_id`/`username`、动作类型 `action_type`、方案 `plan_id`、时间范围 `created_from`/`created_to`。
+
+## 8. 生成前校验与缺失信息提醒
+
+### 校验规则
+
+生成服务在调用 DeepSeek 前执行 `assess_generation_readiness()`，按三类字段检查完整性：
+
+| 分类 | 字段 |
+| --- | --- |
+| 企业层面 | 企业名称、所属行业、主营业务、年营收、当前市场、出口占比、工厂产能、是否已有海外客户、团队国际化能力、资金能力 |
+| 产品层面 | 产品名称、产品类别、HS编码、认证情况、MOQ、交期、价格带、产能、是否适合出口、产品图片/资料附件 |
+| 出海目标层面 | 目标国家、目标渠道、目标客户类型、是否计划参展、是否需要融资、是否考虑海外仓/海外工厂 |
+
+状态判断：
+
+1. **可生成**：企业名称、所属行业、产品名称、目标国家等基础字段存在，缺失字段较少；
+2. **可生成但质量较低**：基础字段存在，但年营收、HS 编码、认证情况、价格带、目标渠道/客户类型等关键字段缺失较多；
+3. **不建议生成**：企业名称、所属行业、产品名称、目标国家等基础字段缺失。后端默认不调用 DeepSeek，并返回失败状态；如果前端传入 `continue_on_validation_warning=true`，则允许继续生成。
+
+无论是否阻断，缺失字段都会按照“企业层面 / 产品层面 / 出海目标层面”分类写入项目 `metadata.generation_readiness`，并传入 DeepSeek Prompt。Prompt 明确要求 AI 将缺失项视为数据缺口，不得编造企业事实、认证、价格、产能、客户、资源或联系方式。
+
+### 前端提示逻辑
+
+1. 用户点击“生成方案”后，前端先用同一套字段口径做本地校验；
+2. 若状态为“可生成”，直接生成，同时在页面展示缺失字段分类提醒；
+3. 若状态为“可生成但质量较低”，仍允许直接生成，但提示方案质量会降低；
+4. 若状态为“不建议生成”，弹窗展示三类缺失字段，按钮包括：
+   - “返回补充”：关闭弹窗，用户继续完善资料；
+   - “继续生成”：提交生成请求，并携带 `continue_on_validation_warning=true`；
+5. 用户选择“继续生成”后，后端会在方案结果中追加 `data_quality_review`，并在 `global_manual_review_items` 中标记“因生成前信息缺失，方案需人工补充/复核”。
+
+### 后端返回结构示例
+
+#### 校验通过或缺失不严重
+
+```json
+{
+  "project": {
+    "generation_status": "completed",
+    "metadata": {
+      "generation_readiness": {
+        "status": "可生成",
+        "status_code": "ready",
+        "message": "信息基本完整，可生成企业出海方案。",
+        "missing_categories": [],
+        "missing_count": 0,
+        "total_required_count": 26,
+        "critical_missing_fields": [],
+        "should_popup": false,
+        "manual_review_required": false,
+        "prompt_instruction": "生成前数据完整性状态：可生成……"
+      }
+    }
+  },
+  "preview": {
+    "sections": {}
+  }
+}
+```
+
+#### 缺失严重且用户未选择继续生成
+
+```json
+{
+  "project": {
+    "generation_status": "failed",
+    "error_reason": "缺失企业名称、所属行业、产品名称或目标国家等基础字段，不建议直接生成。",
+    "metadata": {
+      "generation_readiness": {
+        "status": "不建议生成",
+        "status_code": "not_recommended",
+        "missing_categories": [
+          { "category": "企业层面", "fields": ["企业名称"] },
+          { "category": "产品层面", "fields": ["产品名称", "认证情况"] },
+          { "category": "出海目标层面", "fields": ["目标国家"] }
+        ],
+        "critical_missing_fields": ["企业名称", "产品名称", "目标国家"],
+        "should_popup": true,
+        "manual_review_required": true
+      }
+    }
+  },
+  "preview": null,
+  "audit_log": {
+    "success": false,
+    "error_reason": "缺失企业名称、所属行业、产品名称或目标国家等基础字段，不建议直接生成。"
+  }
+}
+```
+
+#### 缺失严重但用户选择继续生成
+
+```json
+{
+  "project": {
+    "generation_status": "completed",
+    "metadata": {
+      "continue_on_validation_warning": true,
+      "generation_readiness": {
+        "status": "不建议生成",
+        "status_code": "not_recommended",
+        "should_popup": true,
+        "manual_review_required": true
+      }
+    }
+  },
+  "preview": {
+    "sections": {},
+    "data_quality_review": {
+      "status": "不建议生成",
+      "status_code": "not_recommended",
+      "manual_review_required": true,
+      "missing_categories": []
+    },
+    "global_manual_review_items": [
+      "因生成前信息缺失，方案需人工补充/复核"
+    ]
+  }
+}
+```

@@ -1,6 +1,7 @@
 """Reusable service integrations for the agent overseas report project."""
 
 from .rule_engine import OverseasRuleEngine
+from .generation_readiness import GenerationReadinessStatus, assess_generation_readiness
 from .generation_service import (
     AuditLogQuery,
     AuditResultStatus,
@@ -36,6 +37,8 @@ from .llm_service import (
 
 __all__ = [
     "OverseasRuleEngine",
+    "GenerationReadinessStatus",
+    "assess_generation_readiness",
     "AuditLogQuery",
     "AuditResultStatus",
     "DataNotFoundError",

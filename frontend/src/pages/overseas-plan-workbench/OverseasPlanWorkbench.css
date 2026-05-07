@@ -459,3 +459,127 @@
 .editor-hint {
   margin: 8px 0 0;
 }
+
+.readiness-card {
+  margin-top: 16px;
+  padding: 18px;
+  background: #ffffff;
+  border: 1px solid #f8d18b;
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(17, 38, 73, 0.06);
+}
+
+.readiness-card__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.readiness-card__status strong {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.readiness-card__status--ready strong {
+  background: #dcfce7;
+  color: #047857;
+}
+
+.readiness-card__status--low_quality strong {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.readiness-card__status--not_recommended strong {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.readiness-card__status span,
+.validation-modal__hint {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.missing-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.missing-groups--modal {
+  grid-template-columns: 1fr;
+  margin: 16px 0;
+}
+
+.missing-group {
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.missing-group h3 {
+  margin-bottom: 8px;
+  color: #334155;
+  font-size: 14px;
+}
+
+.missing-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.missing-tags span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.validation-modal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 26px;
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.validation-modal h2 {
+  color: #b91c1c;
+}
+
+.validation-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+@media (max-width: 720px) {
+  .missing-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .validation-modal__actions {
+    flex-direction: column-reverse;
+  }
+}
