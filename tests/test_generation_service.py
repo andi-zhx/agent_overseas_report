@@ -85,6 +85,9 @@ def test_generation_service_runs_main_flow_and_writes_completed_audit():
     assert response.audit_log["success"] is True
     assert "示例医疗科技" in llm.prompts[0][0]
     assert "resource_templates" in llm.prompts[0][0]
+    assert "context_bundle" in llm.prompts[0][0]
+    assert "citations" in llm.prompts[0][0]
+    assert response.project["metadata"]["context_bundle"]["enterprise_profile"]["citation_ids"] == ["enterprise_profile:master_data"]
 
 
 def test_generation_service_repairs_invalid_json_once():

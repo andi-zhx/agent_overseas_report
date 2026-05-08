@@ -14,6 +14,15 @@ from .web_research_service import (
     WebSearchClient,
     WebSearchResult,
 )
+from .report_context_builder import (
+    CitationContext,
+    ContextBundle,
+    LocalKnowledgeContext,
+    MissingFieldContext,
+    ReportContextBuilder,
+    RuleEngineContext,
+    WebResearchContext,
+)
 from .rule_engine import OverseasRuleEngine
 from .generation_readiness import GenerationReadinessStatus, assess_generation_readiness
 from .generation_service import (
@@ -63,6 +72,13 @@ __all__ = [
     "WebResearchTopic",
     "WebSearchClient",
     "WebSearchResult",
+    "CitationContext",
+    "ContextBundle",
+    "LocalKnowledgeContext",
+    "MissingFieldContext",
+    "ReportContextBuilder",
+    "RuleEngineContext",
+    "WebResearchContext",
     "OverseasRuleEngine",
     "GenerationReadinessStatus",
     "assess_generation_readiness",
