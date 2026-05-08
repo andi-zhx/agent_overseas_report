@@ -862,7 +862,7 @@ def _export_to_row(log: OverseasPlanAuditLog) -> ReportExportORM:
         exported_at=log.exported_at or log.created_at,
         plan_name=log.plan_name,
         status=log.result_status,
-        metadata_={"audit_log_id": log.id, "action_type": log.action_type},
+        metadata_={"audit_log_id": log.id, "action_type": log.action_type, **copy.deepcopy(log.metadata or {})},
     )
 
 

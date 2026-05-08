@@ -1079,12 +1079,18 @@ class OverseasPlanGenerationService:
             if export_project.result is None:
                 raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
             enterprise = self.data_repository.get_enterprise(export_project.enterprise_id)
+            export_payload = export_project.to_dict()
+            export_payload["products"] = self.data_repository.get_products(export_project.enterprise_id, list(export_project.product_ids))
             result = export_overseas_plan_ppt(
-                project=export_project.to_dict(),
+                project=export_payload,
                 enterprise=enterprise,
                 output_dir=request.output_dir,
                 exported_by=request.exported_by,
                 system_name=request.system_name,
+                report_version=request.report_version,
+                logo_text=request.logo_text,
+                theme_color=request.theme_color,
+                footer_text=request.footer_text,
             )
             project.output_ppt = GeneratedFileRef(file_path=result.file_path)
             self.store.save_project(project)
@@ -1355,6 +1361,7 @@ class OverseasPlanGenerationService:
             metadata={
                 "export_kind": getattr(export_result, "export_kind", None),
                 "report_version": getattr(export_result, "report_version", None),
+                "slide_count": getattr(export_result, "slide_count", None),
                 "audit_log_path": getattr(export_result, "audit_log_path", None),
             },
         )

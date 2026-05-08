@@ -386,7 +386,7 @@ def test_ppt_export_creates_pptx_and_writes_export_audit_log(tmp_path):
     export = service.export_ppt(PPTExportRequest(project_id=generation.project["id"], exported_by="user-2", output_dir=tmp_path))
 
     assert export.export_type == "PPT"
-    assert export.plan_name == "示例医疗科技出海解决方案"
+    assert export.plan_name == "示例医疗科技出海客户汇报稿"
     assert export.file_path.endswith(".pptx")
     assert (tmp_path / generation.project["id"]).exists()
 
@@ -397,14 +397,14 @@ def test_ppt_export_creates_pptx_and_writes_export_audit_log(tmp_path):
         presentation_xml = pptx.read("ppt/presentation.xml").decode("utf-8")
         first_slide_xml = pptx.read("ppt/slides/slide1.xml").decode("utf-8")
         matrix_slide_xml = pptx.read("ppt/slides/slide6.xml").decode("utf-8")
-        risk_slide_xml = pptx.read("ppt/slides/slide12.xml").decode("utf-8")
+        risk_slide_xml = pptx.read("ppt/slides/slide19.xml").decode("utf-8")
 
-    assert len([name for name in names if name.startswith("ppt/slides/slide") and name.endswith(".xml")]) == 12
+    assert len([name for name in names if name.startswith("ppt/slides/slide") and name.endswith(".xml")]) == 20
     assert "Microsoft YaHei" in first_slide_xml
-    assert "《示例医疗科技出海解决方案》" in first_slide_xml
+    assert "本次汇报建议以德国为突破口推进示例医疗科技出海增长" in first_slide_xml
     assert "国家优先级矩阵" in matrix_slide_xml
-    assert "近期应优先控制准入" in risk_slide_xml
-    assert "rId12" in presentation_xml
+    assert "关键风险应通过红黄绿灯机制明确责任人和止损条件" in risk_slide_xml
+    assert "rId20" in presentation_xml
 
     updated_project = service.store.get_project(generation.project["id"])
     assert updated_project.output_ppt.file_path == export.file_path
@@ -415,9 +415,65 @@ def test_ppt_export_creates_pptx_and_writes_export_audit_log(tmp_path):
     assert audit.exported_by == "user-2"
     assert audit.enterprise_id == "ent-1"
     assert audit.enterprise_name == "示例医疗科技"
-    assert audit.plan_name == "示例医疗科技出海解决方案"
+    assert audit.plan_name == "示例医疗科技出海客户汇报稿"
     assert audit.export_type == "PPT"
     assert audit.file_path == export.file_path
+    assert export.slide_count == 20
+    assert export.report_version == "client"
+    assert export.audit_log_path and export.audit_log_path.endswith("ppt_export_audit_log.jsonl")
+    assert audit.metadata["report_version"] == "client"
+    assert audit.metadata["slide_count"] == 20
+    assert audit.metadata["audit_log_path"] == export.audit_log_path
+
+
+def test_ppt_export_internal_version_supports_theme_logo_footer_and_export_record(tmp_path):
+    payload = json.dumps({"sections": REQUIRED_SECTIONS}, ensure_ascii=False)
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+    generation = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    from agent_overseas_report.services import PPTExportRequest
+
+    export = service.export_ppt(
+        PPTExportRequest(
+            project_id=generation.project["id"],
+            exported_by="user-2",
+            report_version="internal",
+            logo_text="ACME Logo",
+            theme_color="#005BAC",
+            footer_text="内部评审材料",
+            output_dir=tmp_path,
+        )
+    )
+
+    import json as json_module
+    import zipfile
+
+    with zipfile.ZipFile(export.file_path) as pptx:
+        slide1_xml = pptx.read("ppt/slides/slide1.xml").decode("utf-8")
+        slide20_xml = pptx.read("ppt/slides/slide20.xml").decode("utf-8")
+        theme_xml = pptx.read("ppt/theme/theme1.xml").decode("utf-8")
+
+    assert export.report_version == "internal"
+    assert export.slide_count == 20
+    assert "ACME Logo" in slide1_xml
+    assert "内部评审材料" in slide1_xml
+    assert "005BAC" in theme_xml
+    assert "内部版需同步跟踪毛利" in slide20_xml
+    with open(export.audit_log_path, encoding="utf-8") as file_obj:
+        record = json_module.loads(file_obj.readlines()[-1])
+    assert record["report_version"] == "internal"
+    assert record["slide_count"] == 20
+    assert record["logo_text"] == "ACME Logo"
+    assert record["theme_color"] == "005BAC"
 
 
 def test_excel_export_action_plan_creates_xlsx_and_writes_export_audit_log(tmp_path):
