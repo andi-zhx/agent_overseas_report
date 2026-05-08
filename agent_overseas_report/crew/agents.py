@@ -1,4 +1,4 @@
-"""Agent definitions for the minimal CrewAI overseas-plan crew."""
+"""Agent definitions for the enterprise CrewAI overseas-report crew."""
 
 from __future__ import annotations
 
@@ -17,11 +17,14 @@ class MinimalAgent:
     role: str
     goal: str
     backstory: str
+    input_spec: str
+    output_spec: str
+    constraints: tuple[str, ...]
     allow_delegation: bool = False
 
 
 def create_agents(settings: CrewAISettings | None = None, llm: Any | None = None) -> dict[str, Any]:
-    """Create the three single-responsibility agents.
+    """Create the enterprise overseas-report agents.
 
     When the optional ``crewai`` package is importable this returns real
     ``crewai.Agent`` instances. Otherwise it returns ``MinimalAgent`` objects so
@@ -43,6 +46,9 @@ def _create_agent(*, name: str, config: CrewAgentConfig, llm: Any | None, verbos
             role=config.role,
             goal=config.goal,
             backstory=config.backstory,
+            input_spec=config.input_spec,
+            output_spec=config.output_spec,
+            constraints=config.constraints,
             allow_delegation=config.allow_delegation,
         )
 
@@ -51,7 +57,7 @@ def _create_agent(*, name: str, config: CrewAgentConfig, llm: Any | None, verbos
     kwargs: dict[str, Any] = {
         "role": config.role,
         "goal": config.goal,
-        "backstory": config.backstory,
+        "backstory": f"{config.backstory}\n\n{config.instruction_block()}",
         "allow_delegation": config.allow_delegation,
         "verbose": verbose,
     }

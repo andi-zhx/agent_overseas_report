@@ -56,21 +56,50 @@ def make_repo():
     )
 
 
-def test_crewai_config_keeps_three_single_responsibility_agents():
+def test_crewai_config_defines_complete_enterprise_agents():
     settings = CrewAISettings.from_env()
     task_specs = create_task_specs()
     packaged = load_packaged_config()
 
-    assert set(settings.agent_configs) == {"research", "strategy", "report"}
-    assert [task.agent_name for task in task_specs] == ["research", "strategy", "report"]
+    expected_agents = [
+        "company_diagnosis",
+        "market_research",
+        "channel_strategy",
+        "resource_matching",
+        "financial_planning",
+        "risk_compliance",
+        "report_writer",
+        "quality_review",
+    ]
+
+    assert list(settings.agent_configs) == expected_agents
+    assert [task.agent_name for task in task_specs] == expected_agents
+    assert [task.save_key for task in task_specs] == packaged["tasks"]
     assert packaged["feature_flag"] == "ENABLE_CREWAI=true"
-    assert len(packaged["agents"]) == 3
+    assert len(packaged["agents"]) == 8
+    for config in settings.agent_configs.values():
+        assert config.role.endswith("Agent")
+        assert config.goal
+        assert config.backstory
+        assert config.input_spec
+        assert config.output_spec
+        assert any("不得编造数据" in constraint for constraint in config.constraints)
+        assert any("citations" in constraint for constraint in config.constraints)
 
 
 def test_generation_service_uses_crewai_only_when_env_flag_enabled(monkeypatch):
     monkeypatch.setenv("ENABLE_CREWAI", "true")
     payload = json.dumps({"sections": REQUIRED_SECTIONS}, ensure_ascii=False)
-    llm = FakeLLM(["研究摘要", "策略输出", payload])
+    llm = FakeLLM([
+        "企业诊断",
+        "市场研究",
+        "渠道策略",
+        "资源匹配",
+        "财务规划",
+        "风险合规",
+        payload,
+        json.dumps({"status": "revision_required", "issues": ["缺少来源"], "required_revisions": ["补充 citations"]}, ensure_ascii=False),
+    ])
     service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
 
     response = service.generate(
@@ -85,9 +114,33 @@ def test_generation_service_uses_crewai_only_when_env_flag_enabled(monkeypatch):
 
     assert response.project["generation_status"] == "completed"
     assert response.project["metadata"]["orchestration"] == "crewai"
-    assert response.project["metadata"]["crewai"]["agents"] == ["ResearchAgent", "StrategyAgent", "ReportAgent"]
+    assert response.project["metadata"]["crewai"]["agents"] == [
+        "CompanyDiagnosisAgent",
+        "MarketResearchAgent",
+        "ChannelStrategyAgent",
+        "ResourceMatchingAgent",
+        "FinancialPlanningAgent",
+        "RiskComplianceAgent",
+        "ReportWriterAgent",
+        "QualityReviewAgent",
+    ]
+    assert response.project["metadata"]["crewai_quality_status"] == "revision_required"
+    assert set(response.project["metadata"]["crewai_step_outputs"]) == {
+        "company_diagnosis",
+        "market_research",
+        "channel_strategy",
+        "resource_matching",
+        "financial_planning",
+        "risk_compliance",
+        "report_writing",
+        "quality_review",
+    }
     assert response.preview == {"sections": REQUIRED_SECTIONS}
-    assert len(llm.prompts) == 3
-    assert "ResearchAgent" in llm.prompts[0][1]
-    assert "StrategyAgent" in llm.prompts[1][1]
-    assert "ReportAgent" in llm.prompts[2][0]
+    assert len(llm.prompts) == 8
+    assert "CompanyDiagnosisAgent" in llm.prompts[0][1]
+    assert "ContextBundle" in llm.prompts[0][0]
+    assert "不得编造数据" in llm.prompts[0][0]
+    assert "citations" in llm.prompts[0][0]
+    assert "不得自行访问数据库" in llm.prompts[0][0]
+    assert "QualityReviewAgent" in llm.prompts[7][1]
+    assert "revision_required" in llm.prompts[7][0]

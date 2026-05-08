@@ -1,9 +1,9 @@
-"""Minimal CrewAI orchestration package for overseas-plan generation."""
+"""CrewAI orchestration package for enterprise overseas-plan generation."""
 
 from .agents import MinimalAgent, create_agents
 from .config import CrewAISettings, CrewAgentConfig, is_crewai_enabled, load_packaged_config
 from .crew import MinimalCrew, create_overseas_plan_crew
-from .crew_runner import CrewOverseasPlanRunner, CrewRunResult
+from .crew_runner import CrewOverseasPlanRunner, CrewRunResult, CrewStepOutput
 from .tasks import CrewTaskSpec, create_task_specs
 
 __all__ = [
@@ -11,6 +11,7 @@ __all__ = [
     "CrewAgentConfig",
     "CrewOverseasPlanRunner",
     "CrewRunResult",
+    "CrewStepOutput",
     "CrewTaskSpec",
     "MinimalAgent",
     "MinimalCrew",
