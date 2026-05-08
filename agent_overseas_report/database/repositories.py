@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any, Protocol
 from uuid import uuid4
@@ -17,12 +18,18 @@ from agent_overseas_report.database.models import (
     OverseasPlanVersionORM,
     ProductORM,
     ReportExportORM,
+    ReportQualityScoreORM,
     WebResearchSourceORM,
 )
 from agent_overseas_report.database.session import create_session_factory
 from agent_overseas_report.models import GeneratedFileRef, GenerationProject, GenerationSource, GenerationStatus, MaturityLevel, PlanContentVersion
 from agent_overseas_report.models.overseas_generation import utc_now
 from agent_overseas_report.services.web_research_service import WebResearchSource
+from agent_overseas_report.services.report_quality_scoring_service import (
+    ReportQualityDimensionScore,
+    ReportQualityScore,
+    ReportQualityStatus,
+)
 from agent_overseas_report.services.generation_service import (
     AuditLogQuery,
     DataNotFoundError,
@@ -64,6 +71,10 @@ class GenerationRepository(Protocol):
     def append_export_audit_log(self, audit_log: OverseasPlanAuditLog) -> OverseasPlanAuditLog: ...
 
     def list_export_audit_logs(self, project_id: str | None = None) -> list[OverseasPlanAuditLog]: ...
+
+    def save_report_quality_score(self, score: ReportQualityScore) -> ReportQualityScore: ...
+
+    def get_latest_report_quality_score(self, project_id: str) -> ReportQualityScore | None: ...
 
 
 class EnterpriseRepository(Protocol):
@@ -334,6 +345,25 @@ class SQLiteGenerationRepository:
         if project_id is not None:
             logs = [log for log in logs if log.plan_id == project_id or log.project_id == project_id]
         return logs
+
+    def save_report_quality_score(self, score: ReportQualityScore) -> ReportQualityScore:
+        saved = copy.deepcopy(score)
+        if saved.id is None:
+            saved.id = f"rqs_{uuid4().hex}"
+        with self.session_factory() as session:
+            session.add(_quality_score_to_row(saved))
+            session.commit()
+        return saved
+
+    def get_latest_report_quality_score(self, project_id: str) -> ReportQualityScore | None:
+        with self.session_factory() as session:
+            row = session.scalars(
+                select(ReportQualityScoreORM)
+                .where(ReportQualityScoreORM.project_id == project_id)
+                .order_by(ReportQualityScoreORM.created_at.desc(), ReportQualityScoreORM.id.desc())
+                .limit(1)
+            ).first()
+            return _row_to_quality_score(row) if row else None
 
     def list_report_exports(self, project_id: str | None = None) -> list[dict[str, Any]]:
         with self.session_factory() as session:
@@ -862,3 +892,35 @@ def _coerce_datetime(value: Any) -> datetime | None:
         except ValueError:
             return None
     return None
+
+
+def _quality_score_to_row(score: ReportQualityScore) -> ReportQualityScoreORM:
+    return ReportQualityScoreORM(
+        id=score.id or f"rqs_{uuid4().hex}",
+        created_at=_coerce_datetime(score.created_at) or utc_now(),
+        updated_at=_coerce_datetime(score.created_at) or utc_now(),
+        status=score.status.value,
+        metadata_=copy.deepcopy(score.metadata or {}),
+        project_id=score.project_id,
+        version_number=score.version_number,
+        total_score=score.total_score,
+        quality_status=score.status.value,
+        dimension_scores=[asdict(item) for item in score.dimension_scores],
+        issues=copy.deepcopy(score.issues),
+        suggestions=copy.deepcopy(score.suggestions),
+    )
+
+
+def _row_to_quality_score(row: ReportQualityScoreORM) -> ReportQualityScore:
+    return ReportQualityScore(
+        id=row.id,
+        project_id=row.project_id,
+        version_number=row.version_number,
+        total_score=row.total_score,
+        status=ReportQualityStatus(row.quality_status),
+        dimension_scores=[ReportQualityDimensionScore(**item) for item in copy.deepcopy(row.dimension_scores or [])],
+        issues=copy.deepcopy(row.issues or []),
+        suggestions=copy.deepcopy(row.suggestions or []),
+        created_at=row.created_at,
+        metadata=copy.deepcopy(row.metadata_ or {}),
+    )

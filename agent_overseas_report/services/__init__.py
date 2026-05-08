@@ -25,6 +25,12 @@ from .report_context_builder import (
 )
 from .rule_engine import OverseasRuleEngine
 from .generation_readiness import GenerationReadinessStatus, assess_generation_readiness
+from .report_quality_scoring_service import (
+    ReportQualityDimensionScore,
+    ReportQualityScore,
+    ReportQualityScoringService,
+    ReportQualityStatus,
+)
 from .generation_service import (
     AuditLogQuery,
     AuditResultStatus,
@@ -82,6 +88,10 @@ __all__ = [
     "OverseasRuleEngine",
     "GenerationReadinessStatus",
     "assess_generation_readiness",
+    "ReportQualityDimensionScore",
+    "ReportQualityScore",
+    "ReportQualityScoringService",
+    "ReportQualityStatus",
     "AuditLogQuery",
     "AuditResultStatus",
     "DataNotFoundError",

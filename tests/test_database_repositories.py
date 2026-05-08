@@ -70,6 +70,7 @@ def test_database_tables_include_required_common_columns() -> None:
         "overseas_audit_logs",
         "report_exports",
         "web_research_sources",
+        "report_quality_scores",
     }
 
     assert expected_tables.issubset(set(inspector.get_table_names()))
@@ -114,6 +115,17 @@ def test_database_tables_include_required_common_columns() -> None:
         "related_country",
         "related_industry",
     }.issubset(web_research_columns)
+
+    quality_columns = {column["name"] for column in inspector.get_columns("report_quality_scores")}
+    assert {
+        "project_id",
+        "version_number",
+        "total_score",
+        "quality_status",
+        "dimension_scores",
+        "issues",
+        "suggestions",
+    }.issubset(quality_columns)
 
     product_columns = {column["name"] for column in inspector.get_columns("products")}
     assert {
@@ -229,6 +241,37 @@ def test_sqlite_generation_repository_round_trips_projects_versions_audits_and_e
     assert versions[0].content_json == {"sections": REQUIRED_SECTIONS}
     assert logs[0].id == audit.id
     assert exports[0]["file_path"] == "/tmp/report.docx"
+
+
+def test_sqlite_generation_repository_persists_report_quality_scores() -> None:
+    from agent_overseas_report.services import ReportQualityScoringService
+
+    _, generation_repo = make_repositories()
+    project = GenerationProject(
+        id=f"ogp_{uuid4().hex}",
+        enterprise_id="ent-db",
+        product_ids=["prod-db"],
+        selected_industry="工业设备",
+        target_countries=["德国"],
+        generation_status=GenerationStatus.COMPLETED,
+        generated_by="user-1",
+        result={"sections": REQUIRED_SECTIONS},
+        metadata={"plan_group_id": "plan-group-quality"},
+    )
+    generation_repo.save_project(project)
+    score = ReportQualityScoringService().score_report(
+        report={"sections": REQUIRED_SECTIONS},
+        project_id=project.id,
+        version_number=1,
+    )
+
+    saved_score = generation_repo.save_report_quality_score(score)
+    loaded_score = generation_repo.get_latest_report_quality_score(project.id)
+
+    assert loaded_score is not None
+    assert loaded_score.id == saved_score.id
+    assert loaded_score.status == saved_score.status
+    assert loaded_score.issues == saved_score.issues
 
 
 def test_generation_service_can_use_sqlite_repository() -> None:

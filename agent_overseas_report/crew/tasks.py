@@ -109,7 +109,13 @@ def build_report_prompt(
     )
 
 
-def build_quality_review_prompt(*, report_json_text: str, step_outputs: dict[str, Any], context_bundle: dict[str, Any]) -> str:
+def build_quality_review_prompt(
+    *,
+    report_json_text: str,
+    step_outputs: dict[str, Any],
+    context_bundle: dict[str, Any],
+    quality_scoring_result: dict[str, Any] | None = None,
+) -> str:
     config = default_agent_configs()["quality_review"]
     return (
         f"你是 {config.role}，负责最终质量复核。\n"
@@ -122,7 +128,9 @@ def build_quality_review_prompt(*, report_json_text: str, step_outputs: dict[str
         "1. 缺少来源/citations 的事实、数据、政策、风险或资源建议 => status 必须为 revision_required；\n"
         "2. 结论空泛、没有企业/产品/国家/渠道/时间动作细节 => status 必须为 revision_required；\n"
         "3. 预算、融资、扩产、现金流结论没有清晰假设 => status 必须为 revision_required；\n"
-        "4. 只有全部通过时才能返回 status=approved。\n\n"
+        "4. 只有全部通过时才能返回 status=approved；\n"
+        "5. 如输入包含 automatic_quality_scoring_result，必须优先引用其中 total_score、status、issues 和 suggestions。\n\n"
+        f"automatic_quality_scoring_result：\n{_to_json(quality_scoring_result or {})}\n\n"
         f"ContextBundle：\n{_to_json(context_bundle)}\n\n"
         f"上游步骤输出：\n{_to_json(step_outputs)}\n\n"
         f"待复核报告 JSON 文本：\n{report_json_text}"
