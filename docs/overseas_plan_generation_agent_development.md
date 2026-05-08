@@ -355,7 +355,8 @@ response = service.generate(
 - DTO：`PPTExportRequest` / `PPTExportResult`。
 - 文件格式：`.pptx`。
 - 默认目录：`/tmp/agent_overseas_report/exports/ppt/{project_id}/`。
-- 内容：面向汇报场景的出海方案页，包括诊断、市场优先级、渠道打法、资源匹配、路线图、风险等。
+- 内容：面向路演、客户沟通和项目评审的 20 页咨询风格客户汇报稿；每页使用观点式标题，并覆盖核心结论、机会判断、企业与产品画像、成熟度评分、国家优先级矩阵、市场规模、竞品价格带、客户渠道结构、进入模式、渠道路径、展会/推介会/采购对接、海外资源、合规风险、融资扩产、预算 KPI、12/24 个月路线图、关键风险和下一步行动。
+- 版本与品牌：`PPTExportRequest` 支持 `report_version`（客户版/内部版）、`logo_text`、`theme_color`、`footer_text`，导出结果写入 `ppt_export_audit_log.jsonl` 并在统一审计元数据中保存版本、页数和导出记录路径。
 
 ### 9.3 Excel 导出
 

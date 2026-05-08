@@ -52,7 +52,7 @@ from .generation_service import (
     PlanLLMClient,
 )
 from .excel_export_service import ExcelExportKind, ExcelExportRequest, ExcelExportResult
-from .ppt_export_service import PPTExportRequest, PPTExportResult
+from .ppt_export_service import PPTExportRequest, PPTExportResult, PPTReportVersion
 from .word_export_service import WordExportRequest, WordExportResult, WordReportVersion
 
 from .llm_service import (
@@ -115,6 +115,7 @@ __all__ = [
     "ExcelExportResult",
     "PPTExportRequest",
     "PPTExportResult",
+    "PPTReportVersion",
     "WordExportRequest",
     "WordExportResult",
     "WordReportVersion",
