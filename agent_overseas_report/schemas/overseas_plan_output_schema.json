@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-overseas-report.local/schemas/overseas-plan-output.schema.json",
+  "title": "一级市场投资分析师级企业出海方案输出",
+  "type": "object",
+  "required": [
+    "report_title",
+    "version",
+    "language",
+    "investment_analysis_report",
+    "sections"
+  ],
+  "properties": {
+    "report_title": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string"
+    },
+    "investment_analysis_report": {
+      "$ref": "#/$defs/investment_analysis_report"
+    },
+    "sections": {
+      "$ref": "#/$defs/legacy_sections"
+    },
+    "global_manual_review_items": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "data_quality_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "data_quality_review": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "investment_analysis_report": {
+      "type": "object",
+      "required": [
+        "executive_summary",
+        "enterprise_profile",
+        "product_profile",
+        "overseas_readiness_diagnosis",
+        "industry_and_market_opportunity",
+        "target_country_priority_matrix",
+        "competitor_and_price_band_analysis",
+        "market_entry_strategy",
+        "channel_strategy",
+        "exhibition_and_business_matching_plan",
+        "resource_matching_plan",
+        "compliance_and_policy_risk",
+        "financing_and_capacity_expansion_plan",
+        "budget_and_kpi_projection",
+        "twelve_to_twenty_four_month_roadmap",
+        "key_risks_and_mitigation",
+        "data_sources_and_review_checklist",
+        "appendix"
+      ],
+      "properties": {
+        "executive_summary": {
+          "$ref": "#/$defs/report_module"
+        },
+        "enterprise_profile": {
+          "$ref": "#/$defs/report_module"
+        },
+        "product_profile": {
+          "$ref": "#/$defs/report_module"
+        },
+        "overseas_readiness_diagnosis": {
+          "$ref": "#/$defs/report_module"
+        },
+        "industry_and_market_opportunity": {
+          "$ref": "#/$defs/report_module"
+        },
+        "target_country_priority_matrix": {
+          "$ref": "#/$defs/report_module"
+        },
+        "competitor_and_price_band_analysis": {
+          "$ref": "#/$defs/report_module"
+        },
+        "market_entry_strategy": {
+          "$ref": "#/$defs/report_module"
+        },
+        "channel_strategy": {
+          "$ref": "#/$defs/report_module"
+        },
+        "exhibition_and_business_matching_plan": {
+          "$ref": "#/$defs/report_module"
+        },
+        "resource_matching_plan": {
+          "$ref": "#/$defs/report_module"
+        },
+        "compliance_and_policy_risk": {
+          "$ref": "#/$defs/report_module"
+        },
+        "financing_and_capacity_expansion_plan": {
+          "$ref": "#/$defs/report_module"
+        },
+        "budget_and_kpi_projection": {
+          "$ref": "#/$defs/report_module"
+        },
+        "twelve_to_twenty_four_month_roadmap": {
+          "$ref": "#/$defs/report_module"
+        },
+        "key_risks_and_mitigation": {
+          "$ref": "#/$defs/report_module"
+        },
+        "data_sources_and_review_checklist": {
+          "$ref": "#/$defs/report_module"
+        },
+        "appendix": {
+          "$ref": "#/$defs/report_module"
+        }
+      },
+      "additionalProperties": true
+    },
+    "report_module": {
+      "type": "object",
+      "required": [
+        "conclusion",
+        "key_findings",
+        "evidence",
+        "recommendation",
+        "assumptions",
+        "missing_information",
+        "citations",
+        "confidence_level"
+      ],
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "conclusion": {
+          "type": "string"
+        },
+        "key_findings": {
+          "type": "array",
+          "items": {
+            "type": [
+              "object",
+              "string"
+            ]
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": [
+              "object",
+              "string"
+            ]
+          }
+        },
+        "recommendation": {
+          "type": "array",
+          "items": {
+            "type": [
+              "object",
+              "string"
+            ]
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing_information": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation"
+          }
+        },
+        "confidence_level": {
+          "type": "string",
+          "enum": [
+            "高",
+            "中",
+            "低"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "citation": {
+      "type": "object",
+      "required": [
+        "citation_id",
+        "source_title",
+        "source_type",
+        "excerpt_or_fact",
+        "review_status"
+      ],
+      "properties": {
+        "citation_id": {
+          "type": "string"
+        },
+        "source_title": {
+          "type": "string"
+        },
+        "source_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_type": {
+          "type": "string"
+        },
+        "excerpt_or_fact": {
+          "type": "string"
+        },
+        "review_status": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "legacy_sections": {
+      "type": "object",
+      "required": [
+        "01_enterprise_diagnosis",
+        "02_overseas_market_selection",
+        "03_entry_mode_design",
+        "04_overseas_resource_matching_plan",
+        "05_exhibition_and_marketing_plan",
+        "06_financing_and_capacity_expansion_plan",
+        "07_12_24_month_implementation_roadmap"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

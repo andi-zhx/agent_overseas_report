@@ -26,7 +26,11 @@ from agent_overseas_report.models import (
     PlanContentVersion,
 )
 from agent_overseas_report.models.overseas_generation import utc_now
-from agent_overseas_report.prompts import build_overseas_plan_prompts
+from agent_overseas_report.prompts import INVESTMENT_GRADE_REPORT_MODULES, build_overseas_plan_prompts
+from agent_overseas_report.schemas.overseas_plan_output_schema import (
+    OverseasPlanOutputSchemaError,
+    validate_overseas_plan_output_schema,
+)
 from agent_overseas_report.services.llm_service import LLMServiceError
 from agent_overseas_report.services.report_context_builder import ReportContextBuilder
 from agent_overseas_report.services.generation_readiness import assess_generation_readiness
@@ -1146,6 +1150,11 @@ class OverseasPlanGenerationService:
         if not isinstance(parsed, dict):
             raise GenerationValidationError("DeepSeek JSON root must be an object")
         _validate_plan_payload(parsed)
+        if "investment_analysis_report" in parsed:
+            try:
+                validate_overseas_plan_output_schema(parsed)
+            except OverseasPlanOutputSchemaError as exc:
+                raise GenerationValidationError(f"DeepSeek JSON failed output schema validation: {exc}") from exc
         return parsed
 
     def _write_project_audit_log(
@@ -1424,6 +1433,32 @@ def _is_verified_resource(item: dict[str, Any]) -> bool:
     return source in _VERIFIED_RESOURCE_SOURCES
 
 
+
+def _fallback_investment_report_module(title: str, error_reason: str) -> dict[str, Any]:
+    return {
+        "title": title,
+        "conclusion": "DeepSeek 输出未通过 JSON Schema 校验，当前模块为规则引擎降级版，需人工补充/复核后交付客户。",
+        "key_findings": [
+            {"finding": "已保留企业、产品、国家和规则引擎可用信息，但缺少完整来源证据链。", "implication": "市场规模、增长率、关税、政策和展会时间不得作为确定结论使用。", "priority": "高"}
+        ],
+        "evidence": [
+            {"claim": "降级方案来自企业输入和规则引擎输出。", "source_type": "rule_engine", "citation_id": "需人工复核", "manual_review_required": True, "notes": error_reason}
+        ],
+        "recommendation": [
+            {"action": "补齐来源、复核动态信息并重新生成投资分析师级报告。", "owner": "顾问/企业", "timeline": "0-3个月", "expected_output": "可交付客户的完整证据链版本"}
+        ],
+        "assumptions": ["当前所有未带来源的数值、政策、关税、展会档期和市场判断均按需人工复核处理。"],
+        "missing_information": ["缺少模型可解析的完整 investment_analysis_report 或可信 citations。"],
+        "citations": [
+            {"citation_id": "需人工复核", "source_title": "规则引擎降级输出", "source_url": None, "source_type": "manual_review", "excerpt_or_fact": "DeepSeek JSON 校验失败后生成的保守占位。", "review_status": "需人工复核"}
+        ],
+        "confidence_level": "低",
+    }
+
+
+def _fallback_investment_analysis_report(error_reason: str) -> dict[str, Any]:
+    return {module: _fallback_investment_report_module(module, error_reason) for module in INVESTMENT_GRADE_REPORT_MODULES}
+
 def _build_rule_based_fallback_payload(enterprise_data: dict[str, Any], rule_output: dict[str, Any], error_reason: str) -> dict[str, Any]:
     enterprise = enterprise_data.get("enterprise") or {}
     products = enterprise_data.get("products") or []
@@ -1440,6 +1475,7 @@ def _build_rule_based_fallback_payload(enterprise_data: dict[str, Any], rule_out
         "report_title": f"{enterprise.get('name') or enterprise.get('enterprise_name') or '企业'}出海方案（规则引擎降级版）",
         "version": "fallback-v1",
         "language": "zh-CN",
+        "investment_analysis_report": _fallback_investment_analysis_report(error_reason),
         "data_quality_notes": [
             "DeepSeek 输出 JSON 解析/修复失败，系统已启用规则引擎降级方案。",
             f"降级原因：{error_reason}",
