@@ -1,0 +1,21 @@
+{
+  "process": "sequential",
+  "agents": {
+    "research": {
+      "role": "ResearchAgent",
+      "goal": "整理本地 RAG 和 WebResearch 结果，形成研究摘要",
+      "single_responsibility": "research_summary_only"
+    },
+    "strategy": {
+      "role": "StrategyAgent",
+      "goal": "基于研究摘要和规则引擎输出生成出海策略",
+      "single_responsibility": "strategy_only"
+    },
+    "report": {
+      "role": "ReportAgent",
+      "goal": "将策略整合为结构化报告 JSON",
+      "single_responsibility": "schema_compatible_report_json_only"
+    }
+  },
+  "feature_flag": "ENABLE_CREWAI=true"
+}
