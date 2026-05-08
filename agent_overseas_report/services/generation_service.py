@@ -1046,8 +1046,10 @@ class OverseasPlanGenerationService:
             if export_project.result is None:
                 raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
             enterprise = self.data_repository.get_enterprise(export_project.enterprise_id)
+            export_payload = export_project.to_dict()
+            export_payload["products"] = self.data_repository.get_products(export_project.enterprise_id, list(export_project.product_ids))
             result = export_overseas_plan_excel(
-                project=export_project.to_dict(),
+                project=export_payload,
                 enterprise=enterprise,
                 export_kind=request.export_kind,
                 output_dir=request.output_dir,
