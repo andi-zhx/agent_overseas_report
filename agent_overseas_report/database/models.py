@@ -124,6 +124,26 @@ class KnowledgeBaseChunkORM(TimestampStatusMetadataMixin, Base):
     file: Mapped[KnowledgeBaseFileORM] = relationship(back_populates="chunks")
 
 
+class WebResearchSourceORM(TimestampStatusMetadataMixin, Base):
+    """Source-preserving public web research records."""
+
+    __tablename__ = "web_research_sources"
+
+    query: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    snippet: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source_domain: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    publish_date: Mapped[date | None] = mapped_column(Date)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    reliability_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    related_enterprise_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    related_product_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    related_country: Mapped[str | None] = mapped_column(String(128), index=True)
+    related_industry: Mapped[str | None] = mapped_column(String(128), index=True)
+
+
 class OverseasGenerationProjectORM(TimestampStatusMetadataMixin, Base):
     """Persisted overseas-plan generation project."""
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -13,11 +13,12 @@ from sqlalchemy.pool import StaticPool
 from agent_overseas_report.database import (
     SQLAlchemyEnterpriseRepository,
     SQLiteGenerationRepository,
+    SQLiteWebResearchSourceRepository,
     create_session_factory,
     initialize_database,
 )
 from agent_overseas_report.models import GenerationProject, GenerationSource, GenerationStatus, PlanContentVersion
-from agent_overseas_report.services import OverseasPlanAuditLog, OverseasPlanGenerationService
+from agent_overseas_report.services import OverseasPlanAuditLog, OverseasPlanGenerationService, WebResearchSource
 
 REQUIRED_SECTIONS = {
     "01_enterprise_diagnosis": {"title": "01 企业诊断"},
@@ -68,6 +69,7 @@ def test_database_tables_include_required_common_columns() -> None:
         "overseas_plan_versions",
         "overseas_audit_logs",
         "report_exports",
+        "web_research_sources",
     }
 
     assert expected_tables.issubset(set(inspector.get_table_names()))
@@ -95,6 +97,23 @@ def test_database_tables_include_required_common_columns() -> None:
         "channel_requirements",
         "expansion_plan",
     }.issubset(enterprise_columns)
+
+    web_research_columns = {column["name"] for column in inspector.get_columns("web_research_sources")}
+    assert {
+        "query",
+        "title",
+        "url",
+        "snippet",
+        "source_domain",
+        "publish_date",
+        "retrieved_at",
+        "reliability_score",
+        "source_type",
+        "related_enterprise_id",
+        "related_product_id",
+        "related_country",
+        "related_industry",
+    }.issubset(web_research_columns)
 
     product_columns = {column["name"] for column in inspector.get_columns("products")}
     assert {
@@ -299,3 +318,46 @@ def test_knowledge_base_tables_include_file_and_chunk_columns() -> None:
         "token_count",
         "metadata",
     }.issubset(chunk_columns)
+
+
+def test_sqlite_web_research_source_repository_round_trips_and_filters_cache() -> None:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    initialize_database(engine)
+    repo = SQLiteWebResearchSourceRepository(create_session_factory(engine))
+    retrieved_at = datetime.now(timezone.utc)
+    source = WebResearchSource(
+        id="wrs-db",
+        query="德国 医疗器械 import policy government customs",
+        title="Official import policy",
+        url="https://trade.gov/import-policy",
+        snippet="Official source snippet",
+        source_domain="trade.gov",
+        publish_date="2026-01-15",
+        retrieved_at=retrieved_at,
+        reliability_score=0.95,
+        source_type="official_government_or_multilateral",
+        related_enterprise_id="ent-db",
+        related_product_id="prod-db",
+        related_country="德国",
+        related_industry="医疗器械",
+        metadata={"topic": "import_policy"},
+    )
+
+    repo.save_sources([source])
+    cached = repo.find_cached_sources(
+        query=source.query,
+        related_enterprise_id="ent-db",
+        related_product_id="prod-db",
+        related_country="德国",
+        related_industry="医疗器械",
+        min_retrieved_at=retrieved_at - timedelta(minutes=1),
+    )
+
+    assert cached[0].url == source.url
+    assert cached[0].retrieved_at is not None
+    assert cached[0].metadata["topic"] == "import_policy"

@@ -17,10 +17,12 @@ from agent_overseas_report.database.models import (
     OverseasPlanVersionORM,
     ProductORM,
     ReportExportORM,
+    WebResearchSourceORM,
 )
 from agent_overseas_report.database.session import create_session_factory
 from agent_overseas_report.models import GeneratedFileRef, GenerationProject, GenerationSource, GenerationStatus, MaturityLevel, PlanContentVersion
 from agent_overseas_report.models.overseas_generation import utc_now
+from agent_overseas_report.services.web_research_service import WebResearchSource
 from agent_overseas_report.services.generation_service import (
     AuditLogQuery,
     DataNotFoundError,
@@ -358,6 +360,60 @@ class SQLiteGenerationRepository:
 
 
 
+class SQLiteWebResearchSourceRepository:
+    """SQLite/SQLAlchemy repository for source-preserving web research records."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self.session_factory = session_factory
+
+    @classmethod
+    def from_engine(cls, engine: Engine) -> SQLiteWebResearchSourceRepository:
+        return cls(create_session_factory(engine))
+
+    def save_sources(self, sources: list[WebResearchSource]) -> list[WebResearchSource]:
+        saved: list[WebResearchSource] = []
+        with self.session_factory() as session:
+            for source in sources:
+                existing = session.scalar(
+                    select(WebResearchSourceORM).where(
+                        WebResearchSourceORM.query == source.query,
+                        WebResearchSourceORM.url == source.url,
+                    )
+                )
+                row = existing or WebResearchSourceORM(id=source.id, created_at=_coerce_datetime(source.retrieved_at) or utc_now())
+                if existing is None:
+                    session.add(row)
+                _apply_web_research_source(row, source)
+                saved.append(_web_research_row_to_source(row))
+            session.commit()
+        return saved
+
+    def find_cached_sources(
+        self,
+        *,
+        query: str,
+        related_enterprise_id: str | None = None,
+        related_product_id: str | None = None,
+        related_country: str | None = None,
+        related_industry: str | None = None,
+        min_retrieved_at: datetime | None = None,
+    ) -> list[WebResearchSource]:
+        statement = select(WebResearchSourceORM).where(WebResearchSourceORM.query == query)
+        if related_enterprise_id is not None:
+            statement = statement.where(WebResearchSourceORM.related_enterprise_id == related_enterprise_id)
+        if related_product_id is not None:
+            statement = statement.where(WebResearchSourceORM.related_product_id == related_product_id)
+        if related_country is not None:
+            statement = statement.where(WebResearchSourceORM.related_country == related_country)
+        if related_industry is not None:
+            statement = statement.where(WebResearchSourceORM.related_industry == related_industry)
+        if min_retrieved_at is not None:
+            statement = statement.where(WebResearchSourceORM.retrieved_at >= min_retrieved_at)
+        statement = statement.order_by(WebResearchSourceORM.reliability_score.desc(), WebResearchSourceORM.retrieved_at.desc())
+        with self.session_factory() as session:
+            return [_web_research_row_to_source(row) for row in session.scalars(statement).all()]
+
+
 ENTERPRISE_STRUCTURED_FIELDS = {
     "name",
     "unified_social_credit_code",
@@ -401,6 +457,46 @@ PRODUCT_STRUCTURED_FIELDS = {
     "channel_fit",
     "financing_expansion_assumptions",
 }
+
+
+def _apply_web_research_source(row: WebResearchSourceORM, source: WebResearchSource) -> None:
+    retrieved_at = _coerce_datetime(source.retrieved_at) or utc_now()
+    row.query = source.query
+    row.title = source.title
+    row.url = source.url
+    row.snippet = source.snippet
+    row.source_domain = source.source_domain
+    row.publish_date = _coerce_date(source.publish_date)
+    row.retrieved_at = retrieved_at
+    row.reliability_score = float(source.reliability_score)
+    row.source_type = source.source_type
+    row.related_enterprise_id = source.related_enterprise_id
+    row.related_product_id = source.related_product_id
+    row.related_country = source.related_country
+    row.related_industry = source.related_industry
+    row.status = "active"
+    row.metadata_ = copy.deepcopy(source.metadata or {})
+    row.updated_at = retrieved_at
+
+
+def _web_research_row_to_source(row: WebResearchSourceORM) -> WebResearchSource:
+    return WebResearchSource(
+        id=row.id,
+        query=row.query,
+        title=row.title,
+        url=row.url,
+        snippet=row.snippet,
+        source_domain=row.source_domain,
+        publish_date=row.publish_date,
+        retrieved_at=row.retrieved_at,
+        reliability_score=row.reliability_score,
+        source_type=row.source_type,
+        related_enterprise_id=row.related_enterprise_id,
+        related_product_id=row.related_product_id,
+        related_country=row.related_country,
+        related_industry=row.related_industry,
+        metadata=copy.deepcopy(row.metadata_ or {}),
+    )
 
 
 def _apply_enterprise_payload(row: EnterpriseORM, payload: dict[str, Any], *, now: datetime) -> None:

@@ -30,6 +30,7 @@ from agent_overseas_report.prompts import build_overseas_plan_prompts
 from agent_overseas_report.services.llm_service import LLMServiceError
 from agent_overseas_report.services.generation_readiness import assess_generation_readiness
 from agent_overseas_report.services.rule_engine import OverseasRuleEngine
+from agent_overseas_report.services.web_research_service import WebResearchRequest, WebResearchService, WebResearchTask
 from agent_overseas_report.services.excel_export_service import ExcelExportRequest, ExcelExportResult, export_overseas_plan_excel
 from agent_overseas_report.services.ppt_export_service import PPTExportRequest, PPTExportResult, export_overseas_plan_ppt
 from agent_overseas_report.services.word_export_service import WordExportRequest, WordExportResult, export_overseas_plan_word
@@ -382,6 +383,7 @@ class OverseasPlanGenerationService:
     template_repository: KnowledgeBaseTemplateRepository = field(default_factory=get_default_template_repository)
     rule_engine: OverseasRuleEngine | None = None
     knowledge_retriever: KnowledgeRetriever | None = None
+    web_research_service: WebResearchService | None = None
 
     def __post_init__(self) -> None:
         if self.rule_engine is None:
@@ -509,6 +511,9 @@ class OverseasPlanGenerationService:
             template_payload = self._load_templates(project, enterprise_data)
             rule_output = self.rule_engine.evaluate(enterprise_data) if self.rule_engine else {}
             retrieved_context = self._retrieve_context(project, enterprise_data)
+            web_research_context = self._retrieve_web_research_context(project, enterprise_data, retrieved_context)
+            if web_research_context:
+                retrieved_context = [*retrieved_context, *web_research_context]
             project.metadata["retrieved_context"] = retrieved_context
             prompt_bundle = build_overseas_plan_prompts(
                 enterprise_data={**enterprise_data, "templates": template_payload, "generation_readiness": readiness_report.to_dict()},
@@ -613,6 +618,47 @@ class OverseasPlanGenerationService:
             ):
                 results_by_chunk_id.setdefault(str(result.get("chunk_id")), result)
         return sorted(results_by_chunk_id.values(), key=lambda item: item.get("relevance_score", 0), reverse=True)[:8]
+
+    def _retrieve_web_research_context(
+        self,
+        project: GenerationProject,
+        enterprise_data: dict[str, Any],
+        local_context: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Run source-preserving web research when local knowledge is insufficient."""
+
+        if self.web_research_service is None or not self._should_run_web_research(project, local_context):
+            return []
+        enterprise = enterprise_data.get("enterprise", {}) if isinstance(enterprise_data.get("enterprise"), dict) else {}
+        products = enterprise_data.get("products", []) if isinstance(enterprise_data.get("products"), list) else []
+        product_names = [str(product.get("name")) for product in products if isinstance(product, dict) and product.get("name")]
+        request = WebResearchRequest(
+            enterprise_id=project.enterprise_id,
+            product_ids=list(project.product_ids),
+            enterprise_name=str(enterprise.get("name")) if enterprise.get("name") else None,
+            product_names=product_names,
+            industry=project.selected_industry,
+            target_countries=list(project.target_countries),
+            force_refresh=bool(project.metadata.get("extra_context", {}).get("force_web_research")),
+        )
+        result = WebResearchTask(service=self.web_research_service, request=request).execute()
+        project.metadata["web_research"] = {
+            "retrieved_at": result.retrieved_at.isoformat(),
+            "source_count": len(result.sources),
+            "manual_review_items": list(result.manual_review_items),
+            "topics": [topic.value for topic in request.topics],
+        }
+        return result.to_retrieved_context()
+
+    def _should_run_web_research(self, project: GenerationProject, local_context: list[dict[str, Any]]) -> bool:
+        """Decide whether public web research is needed before report generation."""
+
+        extra_context = project.metadata.get("extra_context", {}) if isinstance(project.metadata.get("extra_context"), dict) else {}
+        if extra_context.get("skip_web_research"):
+            return False
+        if extra_context.get("force_web_research"):
+            return True
+        return not local_context
 
 
     def view_plan_detail(

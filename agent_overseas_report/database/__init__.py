@@ -6,6 +6,7 @@ from agent_overseas_report.database.repositories import (
     GenerationRepository,
     SQLAlchemyEnterpriseRepository,
     SQLiteGenerationRepository,
+    SQLiteWebResearchSourceRepository,
     seed_demo_data,
 )
 from agent_overseas_report.database.session import create_database_engine, create_session_factory, get_database_url, initialize_database
@@ -16,6 +17,7 @@ __all__ = [
     "GenerationRepository",
     "SQLAlchemyEnterpriseRepository",
     "SQLiteGenerationRepository",
+    "SQLiteWebResearchSourceRepository",
     "create_database_engine",
     "create_session_factory",
     "get_database_url",
