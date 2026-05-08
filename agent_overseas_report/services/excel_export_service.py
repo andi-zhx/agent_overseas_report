@@ -40,6 +40,7 @@ class ExcelExportRequest:
     project_id: str
     exported_by: str
     export_kind: ExcelExportKind | str = ExcelExportKind.MANAGEMENT_WORKBOOK
+    report_version: str = "client"
     username: str | None = None
     ip_address: str | None = None
     user_agent: str | None = None

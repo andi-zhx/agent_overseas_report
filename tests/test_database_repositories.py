@@ -404,3 +404,29 @@ def test_sqlite_web_research_source_repository_round_trips_and_filters_cache() -
     assert cached[0].url == source.url
     assert cached[0].retrieved_at is not None
     assert cached[0].metadata["topic"] == "import_policy"
+
+
+def test_audit_and_export_tables_include_delivery_lineage_columns() -> None:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    initialize_database(engine)
+
+    inspector = inspect(engine)
+    audit_columns = {column["name"] for column in inspector.get_columns("overseas_audit_logs")}
+    assert {
+        "used_enterprise_data",
+        "used_product_data",
+        "used_local_knowledge_files",
+        "web_research_enabled",
+        "external_sources",
+        "edited_by",
+        "finalized_by",
+        "export_audience",
+    }.issubset(audit_columns)
+
+    export_columns = {column["name"] for column in inspector.get_columns("report_exports")}
+    assert "export_audience" in export_columns

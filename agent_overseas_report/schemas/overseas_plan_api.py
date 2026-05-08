@@ -37,6 +37,60 @@ class FinalizeOverseasPlanRequest(BaseModel):
     username: str | None = Field(default=None, description="Display name for audit logs.")
 
 
+class EditOverseasPlanRequest(BaseModel):
+    """Request body for saving a manual report edit as a new immutable version."""
+
+    result: dict[str, Any] = Field(..., description="Edited report content JSON to save as a new version.")
+    edited_by: str = Field(..., min_length=1, description="User ID that edited the report.")
+    username: str | None = Field(default=None, description="Display name for audit logs.")
+
+
+class RestoreOverseasPlanVersionRequest(BaseModel):
+    """Request body for restoring a historical version as a new current version."""
+
+    restored_by: str = Field(..., min_length=1, description="User ID that restores the version.")
+    username: str | None = Field(default=None, description="Display name for audit logs.")
+
+
+class ExportOverseasPlanRequest(BaseModel):
+    """Request body for exporting a report artifact."""
+
+    exported_by: str = Field(..., min_length=1, description="User ID that exports the report.")
+    username: str | None = Field(default=None, description="Display name for audit logs.")
+    report_version: str = Field(default="client", pattern="^(client|internal)$", description="Export audience: client or internal.")
+
+
+class OverseasPlanAuditLogListResponse(BaseModel):
+    """Response body for listing append-only plan audit logs."""
+
+    project_id: str
+    logs: list[dict[str, Any]]
+
+
+class OverseasPlanVersionResponse(BaseModel):
+    """Response body for one content version."""
+
+    version: dict[str, Any]
+
+
+class EditOverseasPlanResponse(BaseModel):
+    """Response body after saving a manual edit."""
+
+    project: dict[str, Any]
+
+
+class RestoreOverseasPlanVersionResponse(BaseModel):
+    """Response body after restoring a historical version."""
+
+    project: dict[str, Any]
+
+
+class ExportOverseasPlanResponse(BaseModel):
+    """Response body after exporting a report artifact."""
+
+    export: dict[str, Any]
+
+
 class ErrorResponse(BaseModel):
     """Standard error response payload."""
 

@@ -101,6 +101,24 @@ export type GenerationReadiness = {
 
 export type ReportDepth = "basic" | "standard" | "investment_analyst";
 
+export type AuditLogRecord = {
+  id: string;
+  action_type: string;
+  user_id?: string;
+  username?: string;
+  created_at: string;
+  result_status: string;
+  export_type?: string;
+  export_audience?: string;
+  edited_by?: string;
+  finalized_by?: string;
+  used_enterprise_data?: Array<Record<string, unknown>>;
+  used_product_data?: Array<Record<string, unknown>>;
+  used_local_knowledge_files?: Array<Record<string, unknown>>;
+  web_research_enabled?: boolean;
+  external_sources?: Array<Record<string, unknown>>;
+};
+
 export type DataSourceItem = {
   id: string;
   name: string;
@@ -128,6 +146,7 @@ export type GeneratedPlan = {
   qualityScore?: QualityScore;
   currentVersionNumber?: number;
   versions?: PlanVersionRecord[];
+  auditLogs?: AuditLogRecord[];
 };
 
 export type GeneratePlanPayload = {
@@ -389,6 +408,8 @@ export default function OverseasPlanWorkbench({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [showVersionPanel, setShowVersionPanel] = useState(false);
+  const [showAuditPanel, setShowAuditPanel] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [previewVersionNumber, setPreviewVersionNumber] = useState<number | null>(null);
   const [pendingSevereReadiness, setPendingSevereReadiness] = useState<GenerationReadiness | null>(null);
 
@@ -577,6 +598,35 @@ export default function OverseasPlanWorkbench({
     }
   };
 
+  const handleToggleAuditPanel = async () => {
+    const nextOpen = !showAuditPanel;
+    setShowAuditPanel(nextOpen);
+    if (!nextOpen) {
+      return;
+    }
+    if (onOpenAuditLog) {
+      onOpenAuditLog(plan.projectId);
+      setAuditLogs(plan.auditLogs ?? []);
+      return;
+    }
+    if (!plan.projectId) {
+      setAuditLogs(plan.auditLogs ?? []);
+      return;
+    }
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/overseas-plans/${plan.projectId}/audit-logs`);
+      if (!response.ok) {
+        throw new Error(`审计日志接口异常：${response.status}`);
+      }
+      const payload = await response.json();
+      setAuditLogs(payload.logs ?? []);
+    } catch (auditError) {
+      setError(auditError instanceof Error ? auditError.message : "获取审计日志失败，请稍后重试。");
+    }
+  };
+
+  const visibleAuditLogs = auditLogs.length > 0 ? auditLogs : (plan.auditLogs ?? []);
+
   const updateSection = (value: string) => {
     setPlan((current) => ({
       ...current,
@@ -725,7 +775,7 @@ export default function OverseasPlanWorkbench({
           <button type="button" className="button button--secondary" onClick={() => setShowVersionPanel((open) => !open)}>
             {showVersionPanel ? "收起版本记录" : "查看版本记录"}
           </button>
-          <button type="button" className="button button--secondary" onClick={() => onOpenAuditLog?.(plan.projectId)}>审计日志入口</button>
+          <button type="button" className="button button--secondary" onClick={handleToggleAuditPanel}>{showAuditPanel ? "收起审计日志" : "审计日志入口"}</button>
         </div>
       </section>
 
@@ -746,6 +796,28 @@ export default function OverseasPlanWorkbench({
             </article>
           ))}
           {(plan.versions ?? []).length === 0 && <div className="empty-state">生成或保存方案后展示版本记录。</div>}
+        </section>
+      )}
+
+      {showAuditPanel && (
+        <section className="audit-panel" aria-label="方案审计日志">
+          {visibleAuditLogs.map((log) => (
+            <article className="audit-item" key={log.id}>
+              <div>
+                <strong>{log.action_type}</strong>
+                <span>{new Date(log.created_at).toLocaleString()} · {log.username ?? log.user_id ?? log.edited_by ?? log.finalized_by ?? "--"} · {log.result_status}</span>
+                {log.export_type && <p>导出类型：{log.export_type} · 版本：{log.export_audience === "internal" ? "内部版" : "客户版"}</p>}
+              </div>
+              <dl className="audit-item__meta">
+                <div><dt>企业资料</dt><dd>{log.used_enterprise_data?.length ?? 0}</dd></div>
+                <div><dt>产品资料</dt><dd>{log.used_product_data?.length ?? 0}</dd></div>
+                <div><dt>本地知识库</dt><dd>{log.used_local_knowledge_files?.length ?? 0}</dd></div>
+                <div><dt>联网研究</dt><dd>{log.web_research_enabled ? "已启用" : "未启用"}</dd></div>
+                <div><dt>外部来源</dt><dd>{log.external_sources?.length ?? 0}</dd></div>
+              </dl>
+            </article>
+          ))}
+          {visibleAuditLogs.length === 0 && <div className="empty-state">生成、编辑、定稿或导出后展示审计日志。</div>}
         </section>
       )}
 
