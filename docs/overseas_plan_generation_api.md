@@ -1,10 +1,10 @@
 # 企业出海方案生成 Agent API 说明
 
-当前项目实现的是框架无关的主流程服务：API 层可直接调用 `OverseasPlanGenerationService.generate()` 做同步生成，也可先调用 `create_generation()` 返回 `draft` 任务，再由未来异步队列调用 `run_generation()`。现阶段没有引入 FastAPI/Django 路由，以下为推荐对外 REST 契约。
+当前项目已在框架无关的主流程服务之上新增 FastAPI 后端入口：API 层直接调用 `OverseasPlanGenerationService.generate()` 做同步生成，也可在未来先调用 `create_generation()` 返回 `draft` 任务，再由异步队列调用 `run_generation()`。以下为 REST 契约说明。
 
 ## 1. 创建并生成方案
 
-`POST /api/overseas-plans/generations`
+`POST /api/overseas-plans/generate`
 
 ### 请求参数
 
@@ -79,7 +79,7 @@
 
 ## 2. 重新生成
 
-`POST /api/overseas-plans/generations/{project_id}/regenerate`
+`POST /api/overseas-plans/{project_id}/regenerate`
 
 重新生成会创建新版本，历史方案不会被覆盖；新版本的 `metadata.extra_context.regenerated_from_project_id` 会记录来源项目。
 
@@ -189,12 +189,12 @@
 
 #### 设置最终版
 
-`POST /api/overseas-plans/{project_id}/versions/{version_number}/final`
+`POST /api/overseas-plans/{project_id}/finalize`
 
 请求体：
 
 ```json
-{ "finalized_by": "user-1001" }
+{ "version_number": 1, "finalized_by": "user-1001" }
 ```
 
 服务方法：`OverseasPlanGenerationService.mark_final_version()`。同一方案历史组只保留一个最终版标记，新设置会自动取消其他版本的 `is_final`。
@@ -597,9 +597,9 @@ print(result.file_path)
 
 | 动作 | `action_type` | 服务方法 / 建议 API |
 | --- | --- | --- |
-| 创建出海方案 | `create_plan` | `OverseasPlanGenerationService.create_generation()` / `POST /api/overseas-plans/generations` |
-| 调用 AI 生成方案 | `ai_generate_plan` | `OverseasPlanGenerationService.run_generation()` / `POST /api/overseas-plans/generations/{project_id}/run` |
-| 重新生成方案 | `regenerate_plan` | `OverseasPlanGenerationService.regenerate()` / `POST /api/overseas-plans/generations/{project_id}/regenerate` |
+| 创建出海方案 | `create_plan` | `OverseasPlanGenerationService.create_generation()` / `POST /api/overseas-plans/generate` |
+| 调用 AI 生成方案 | `ai_generate_plan` | `OverseasPlanGenerationService.run_generation()` / `POST /api/overseas-plans/generate` |
+| 重新生成方案 | `regenerate_plan` | `OverseasPlanGenerationService.regenerate()` / `POST /api/overseas-plans/{project_id}/regenerate` |
 | 查看方案详情 | `view_plan_detail` | `OverseasPlanGenerationService.view_plan_detail()` / `GET /api/overseas-plans/{project_id}` |
 | 编辑 AI 生成内容 | `edit_ai_content` | `OverseasPlanGenerationService.update_generated_content()` / `PATCH /api/overseas-plans/{project_id}/generated-content` |
 | 导出 Word | `export_word` | `OverseasPlanGenerationService.export_word()` / `POST /api/overseas-plans/{project_id}/exports/word` |
@@ -750,5 +750,58 @@ logs = service.list_plan_audit_logs(
       "因生成前信息缺失，方案需人工补充/复核"
     ]
   }
+}
+```
+
+## FastAPI 最小启动说明
+
+当前项目已提供 FastAPI 后端入口，并保持生成业务逻辑仍由 `OverseasPlanGenerationService` 执行。现阶段仍不接数据库、不接前端、不接 CrewAI、不做 RAG；API 应用使用内存仓储，默认内置一组演示企业/产品数据用于本地启动验证。
+
+### 安装依赖
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+### 启动服务
+
+```bash
+uvicorn agent_overseas_report.main:app --reload
+```
+
+服务启动后可访问：
+
+- `GET http://127.0.0.1:8000/api/health`
+- `POST http://127.0.0.1:8000/api/overseas-plans/generate`
+- `GET http://127.0.0.1:8000/api/overseas-plans/{project_id}`
+- `GET http://127.0.0.1:8000/api/overseas-plans/{project_id}/versions`
+- `POST http://127.0.0.1:8000/api/overseas-plans/{project_id}/regenerate`
+- `POST http://127.0.0.1:8000/api/overseas-plans/{project_id}/finalize`
+
+如果环境变量 `DEEPSEEK_API_KEY` 已配置，默认服务会使用现有 `DeepSeekLLMService`；如果未配置，则使用本地确定性 Demo LLM 适配器，便于 API 冒烟测试，但请求仍会进入 `OverseasPlanGenerationService` 的既有编排流程。
+
+### 生成接口请求示例
+
+```json
+{
+  "enterprise_id": "ent-1",
+  "product_ids": ["prod-1"],
+  "selected_industry": "医疗器械",
+  "target_countries": ["德国"],
+  "generated_by": "user-1",
+  "extra_context": {
+    "language": "zh-CN"
+  }
+}
+```
+
+### 设置最终版请求示例
+
+`POST /api/overseas-plans/{project_id}/finalize`
+
+```json
+{
+  "version_number": 1,
+  "finalized_by": "user-1"
 }
 ```
