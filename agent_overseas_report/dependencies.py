@@ -8,7 +8,15 @@ from typing import Any
 
 from fastapi import Request
 
-from agent_overseas_report.services import DeepSeekLLMService, InMemoryEnterpriseDataRepository, OverseasPlanGenerationService
+from agent_overseas_report.database import (
+    SQLAlchemyEnterpriseRepository,
+    SQLiteGenerationRepository,
+    create_database_engine,
+    create_session_factory,
+    initialize_database,
+    seed_demo_data,
+)
+from agent_overseas_report.services import DeepSeekLLMService, OverseasPlanGenerationService
 
 
 REQUIRED_SECTIONS: dict[str, Any] = {
@@ -44,40 +52,21 @@ class DemoLLMClient:
 
 
 def create_default_generation_service() -> OverseasPlanGenerationService:
-    """Create the default in-memory generation service for the FastAPI app.
+    """Create the default SQLite-backed generation service for FastAPI.
 
-    No database is connected at this stage. The repository is seeded with a
-    small demo enterprise/product so the application is runnable immediately.
+    The application initializes local SQLite tables on startup and seeds a small
+    demo enterprise/product so smoke tests remain runnable without external
+    services. Unit tests can still inject ``InMemoryGenerationStore`` explicitly.
     """
 
-    data_repository = InMemoryEnterpriseDataRepository(
-        enterprises={
-            "ent-1": {
-                "id": "ent-1",
-                "name": "示例医疗科技",
-                "industry": "医疗器械",
-                "overseas_customers": ["德国经销商A"],
-                "english_materials": ["英文官网", "英文说明书"],
-                "team": {"international_members": 3, "languages": ["英语", "德语"], "export_years": 2},
-                "finance": {"export_budget": 800000, "credit_line": 1200000},
-            }
-        },
-        products={
-            "prod-1": {
-                "id": "prod-1",
-                "enterprise_id": "ent-1",
-                "name": "便携式检测仪",
-                "hs_code": "902780",
-                "certifications": ["CE", "ISO 13485"],
-                "capacity": {"monthly_units": 10000, "lead_time_days": 30},
-                "moq": 50,
-                "price_band": "USD 200-500",
-                "overseas_version": True,
-            }
-        },
-    )
+    engine = create_database_engine()
+    initialize_database(engine)
+    session_factory = create_session_factory(engine)
+    data_repository = SQLAlchemyEnterpriseRepository(session_factory)
+    seed_demo_data(data_repository)
+    store = SQLiteGenerationRepository(session_factory)
     llm_client = DeepSeekLLMService() if os.getenv("DEEPSEEK_API_KEY") else DemoLLMClient()
-    return OverseasPlanGenerationService(data_repository=data_repository, llm_client=llm_client)
+    return OverseasPlanGenerationService(data_repository=data_repository, llm_client=llm_client, store=store)
 
 
 def get_generation_service(request: Request) -> OverseasPlanGenerationService:
