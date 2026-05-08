@@ -19,6 +19,11 @@ from agent_overseas_report.knowledge_base.parsers import (
     parse_document,
     split_text_blocks,
 )
+from agent_overseas_report.knowledge_base.rag import (
+    EmbeddingService,
+    VectorStore,
+    build_chunk_vector_document,
+)
 
 
 @dataclass(slots=True)
@@ -130,6 +135,13 @@ class SQLAlchemyKnowledgeBaseRepository:
                 return None
             return _file_row_to_payload(row, include_chunks=include_chunks)
 
+    def list_chunks_for_file(self, file_id: str) -> list[dict[str, Any]]:
+        with self.session_factory() as session:
+            row = session.get(KnowledgeBaseFileORM, file_id)
+            if row is None:
+                raise KnowledgeFileNotFoundError(file_id)
+            return [_chunk_row_to_payload(chunk) for chunk in row.chunks]
+
     def delete_file(self, file_id: str) -> dict[str, Any] | None:
         with self.session_factory() as session:
             row = session.get(KnowledgeBaseFileORM, file_id)
@@ -142,12 +154,21 @@ class SQLAlchemyKnowledgeBaseRepository:
 
 
 class KnowledgeBaseService:
-    """Application service for storing uploads and extracting text chunks."""
+    """Application service for storing uploads, extracting chunks, and local RAG retrieval."""
 
-    def __init__(self, repository: SQLAlchemyKnowledgeBaseRepository, storage_dir: Path | str) -> None:
+    def __init__(
+        self,
+        repository: SQLAlchemyKnowledgeBaseRepository,
+        storage_dir: Path | str,
+        *,
+        embedding_service: EmbeddingService | None = None,
+        vector_store: VectorStore | None = None,
+    ) -> None:
         self.repository = repository
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.embedding_service = embedding_service
+        self.vector_store = vector_store
 
     def upload_and_parse(self, upload: KnowledgeFileUpload) -> dict[str, Any]:
         file_id = f"kbf_{uuid4().hex}"
@@ -188,6 +209,61 @@ class KnowledgeBaseService:
             return self.repository.replace_parse_result(file_id, chunks)
         except Exception as exc:
             return self.repository.replace_parse_result(file_id, [], parse_error=str(exc))
+
+    def embed_file(self, file_id: str) -> dict[str, Any]:
+        """Vectorize all parsed chunks for one knowledge file into the local vector store."""
+
+        if self.embedding_service is None or self.vector_store is None:
+            raise RuntimeError("Knowledge-base RAG is not configured")
+        file_payload = self.repository.get_file(file_id, include_chunks=True)
+        if file_payload is None:
+            raise KnowledgeFileNotFoundError(file_id)
+        chunks = file_payload.get("chunks", [])
+        if not chunks:
+            return {"file_id": file_id, "embedded_chunk_count": 0, "status": file_payload.get("parsed_status")}
+        vectors = self.embedding_service.embed_texts([chunk["text"] for chunk in chunks])
+        self.vector_store.upsert(
+            [
+                build_chunk_vector_document(chunk, file_payload, vector)
+                for chunk, vector in zip(chunks, vectors, strict=True)
+            ]
+        )
+        return {"file_id": file_id, "embedded_chunk_count": len(chunks), "status": "embedded"}
+
+    def search(
+        self,
+        *,
+        query: str,
+        enterprise_id: str | None = None,
+        product_id: str | None = None,
+        industry: str | None = None,
+        country: str | None = None,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Search vectorized chunks with optional enterprise/product/industry/country filters."""
+
+        if self.embedding_service is None or self.vector_store is None or not query.strip():
+            return []
+        filters = {
+            "enterprise_id": enterprise_id,
+            "product_id": product_id,
+            "industry": industry,
+            "country": country,
+        }
+        results = self.vector_store.search(self.embedding_service.embed_text(query), top_k=top_k, filters=filters)
+        return [
+            {
+                "chunk_id": result.metadata.get("chunk_id") or result.id,
+                "text": result.text,
+                "file_name": result.metadata.get("file_name"),
+                "page_number": result.metadata.get("page_number"),
+                "sheet_name": result.metadata.get("sheet_name"),
+                "slide_number": result.metadata.get("slide_number"),
+                "relevance_score": result.score,
+                "metadata": result.metadata,
+            }
+            for result in results
+        ]
 
     def list_files(
         self, *, enterprise_id: str | None = None, product_id: str | None = None, offset: int = 0, limit: int = 100

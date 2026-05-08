@@ -57,6 +57,23 @@ class EnterpriseDataRepository(Protocol):
         """Return selected products for an enterprise."""
 
 
+
+
+class KnowledgeRetriever(Protocol):
+    """Optional RAG retrieval port used only to enrich generation context."""
+
+    def search(
+        self,
+        *,
+        query: str,
+        enterprise_id: str | None = None,
+        product_id: str | None = None,
+        industry: str | None = None,
+        country: str | None = None,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return source-preserving knowledge chunks for the requested filters."""
+
 class PlanLLMClient(Protocol):
     """Minimal LLM port used by the orchestration service."""
 
@@ -364,6 +381,7 @@ class OverseasPlanGenerationService:
     store: Any = field(default_factory=InMemoryGenerationStore)
     template_repository: KnowledgeBaseTemplateRepository = field(default_factory=get_default_template_repository)
     rule_engine: OverseasRuleEngine | None = None
+    knowledge_retriever: KnowledgeRetriever | None = None
 
     def __post_init__(self) -> None:
         if self.rule_engine is None:
@@ -490,11 +508,14 @@ class OverseasPlanGenerationService:
                 raise GenerationValidationError(readiness_report.message)
             template_payload = self._load_templates(project, enterprise_data)
             rule_output = self.rule_engine.evaluate(enterprise_data) if self.rule_engine else {}
+            retrieved_context = self._retrieve_context(project, enterprise_data)
+            project.metadata["retrieved_context"] = retrieved_context
             prompt_bundle = build_overseas_plan_prompts(
                 enterprise_data={**enterprise_data, "templates": template_payload, "generation_readiness": readiness_report.to_dict()},
                 rule_engine_output=rule_output,
                 resource_library=template_payload["resource_templates"],
                 extra_context={"project_id": project.id, "version": project.version, "generation_readiness": readiness_report.to_dict(), **project.metadata.get("extra_context", {})},
+                retrieved_context=retrieved_context,
             )
             raw_output = self.llm_client.generate_text(prompt_bundle.user_prompt, system_prompt=prompt_bundle.system_prompt)
             parsed_output = self._parse_validate_or_repair(raw_output, prompt_bundle, project, enterprise_data, rule_output)
@@ -550,6 +571,48 @@ class OverseasPlanGenerationService:
             )
 
         return GenerationPreviewResponse(project=project.to_dict(), preview=project.result, audit_log=audit_log.to_dict())
+
+
+    def _retrieve_context(self, project: GenerationProject, enterprise_data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Retrieve local RAG context before prompt generation without replacing existing logic."""
+
+        if self.knowledge_retriever is None:
+            return []
+        enterprise = enterprise_data.get("enterprise", {}) if isinstance(enterprise_data.get("enterprise"), dict) else {}
+        products = enterprise_data.get("products", []) if isinstance(enterprise_data.get("products"), list) else []
+        product_names = [str(product.get("name")) for product in products if isinstance(product, dict) and product.get("name")]
+        query = " ".join(
+            item
+            for item in [
+                str(enterprise.get("name") or ""),
+                project.selected_industry,
+                " ".join(product_names),
+                " ".join(project.target_countries),
+            ]
+            if item
+        )
+        results_by_chunk_id: dict[str, dict[str, Any]] = {}
+        filter_pairs: list[tuple[str | None, str | None]] = []
+        countries = project.target_countries or [None]
+        product_ids = project.product_ids or [None]
+        for country in countries:
+            for product_id in product_ids:
+                filter_pairs.extend([(product_id, country), (product_id, None), (None, country), (None, None)])
+        seen_pairs: set[tuple[str | None, str | None]] = set()
+        for product_id, country in filter_pairs:
+            if (product_id, country) in seen_pairs:
+                continue
+            seen_pairs.add((product_id, country))
+            for result in self.knowledge_retriever.search(
+                query=query,
+                enterprise_id=project.enterprise_id,
+                product_id=product_id,
+                industry=project.selected_industry,
+                country=country,
+                top_k=5,
+            ):
+                results_by_chunk_id.setdefault(str(result.get("chunk_id")), result)
+        return sorted(results_by_chunk_id.values(), key=lambda item: item.get("relevance_score", 0), reverse=True)[:8]
 
 
     def view_plan_detail(

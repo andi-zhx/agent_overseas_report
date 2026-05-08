@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from agent_overseas_report.database import create_session_factory, initialize_database
 from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, KnowledgeFileUpload, SQLAlchemyKnowledgeBaseRepository
 from agent_overseas_report.knowledge_base.parsers import identify_file_type
+from agent_overseas_report.knowledge_base.rag import HashingEmbeddingService, LocalFAISSVectorStore
 
 
 def make_service(tmp_path: Path) -> KnowledgeBaseService:
@@ -22,7 +23,12 @@ def make_service(tmp_path: Path) -> KnowledgeBaseService:
         future=True,
     )
     initialize_database(engine)
-    return KnowledgeBaseService(SQLAlchemyKnowledgeBaseRepository(create_session_factory(engine)), tmp_path / "uploads")
+    return KnowledgeBaseService(
+        SQLAlchemyKnowledgeBaseRepository(create_session_factory(engine)),
+        tmp_path / "uploads",
+        embedding_service=HashingEmbeddingService(dimensions=64),
+        vector_store=LocalFAISSVectorStore(tmp_path / "vectors"),
+    )
 
 
 def test_identify_file_type_from_common_extensions() -> None:
@@ -73,3 +79,38 @@ def test_parse_failure_is_recorded_without_chunks(tmp_path: Path) -> None:
     assert uploaded["parsed_status"] == "failed"
     assert "Unsupported file type" in uploaded["parse_error"]
     assert uploaded["chunks"] == []
+
+
+def test_embed_file_and_search_with_metadata_filters(tmp_path: Path) -> None:
+    source = tmp_path / "market.txt"
+    source.write_text("德国医疗器械市场重视 CE 认证和经销商渠道。智能传感器需要本地售后支持。", encoding="utf-8")
+    service = make_service(tmp_path)
+    uploaded = service.upload_and_parse(
+        KnowledgeFileUpload(
+            file_name="market.txt",
+            temp_path=source,
+            enterprise_id="ent-1",
+            product_id="prod-1",
+            industry="医疗器械",
+            country="德国",
+        )
+    )
+
+    embedded = service.embed_file(uploaded["id"])
+    results = service.search(
+        query="德国 CE 认证 经销商",
+        enterprise_id="ent-1",
+        product_id="prod-1",
+        industry="医疗器械",
+        country="德国",
+        top_k=3,
+    )
+    empty_results = service.search(query="德国 CE", enterprise_id="ent-missing", top_k=3)
+
+    assert embedded == {"file_id": uploaded["id"], "embedded_chunk_count": 1, "status": "embedded"}
+    assert len(results) == 1
+    assert results[0]["chunk_id"] == uploaded["chunks"][0]["id"]
+    assert results[0]["file_name"] == "market.txt"
+    assert results[0]["metadata"]["country"] == "德国"
+    assert "CE" in results[0]["text"]
+    assert empty_results == []

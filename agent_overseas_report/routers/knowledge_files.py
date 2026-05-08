@@ -9,8 +9,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
-from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, KnowledgeFileUpload
-from agent_overseas_report.schemas.knowledge_base_api import KnowledgeBaseFileResponse
+from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, KnowledgeFileNotFoundError, KnowledgeFileUpload
+from agent_overseas_report.schemas.knowledge_base_api import (
+    KnowledgeBaseFileResponse,
+    KnowledgeFileEmbedResponse,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
+)
 from agent_overseas_report.schemas.overseas_plan_api import ErrorResponse
 
 router = APIRouter(tags=["knowledge-base"])
@@ -64,6 +69,47 @@ def upload_knowledge_file(
         if temp_path.exists():
             temp_path.unlink()
         file.file.close()
+
+
+@router.post(
+    "/knowledge/files/{file_id}/embed",
+    response_model=KnowledgeFileEmbedResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Vectorize parsed chunks for a local knowledge file",
+)
+def embed_knowledge_file(
+    file_id: str,
+    service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> dict[str, Any]:
+    """Embed all parsed chunks from one file into the local vector store."""
+
+    try:
+        return service.embed_file(file_id)
+    except KnowledgeFileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Knowledge file not found: {file_id}") from exc
+
+
+@router.post(
+    "/knowledge/search",
+    response_model=KnowledgeSearchResponse,
+    summary="Search local RAG context from vectorized knowledge chunks",
+)
+def search_knowledge(
+    request: KnowledgeSearchRequest,
+    service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> dict[str, Any]:
+    """Search vectorized chunks and preserve source metadata for each result."""
+
+    return {
+        "results": service.search(
+            query=request.query,
+            enterprise_id=request.enterprise_id,
+            product_id=request.product_id,
+            industry=request.industry,
+            country=request.country,
+            top_k=request.top_k,
+        )
+    }
 
 
 @router.get("/knowledge/files", response_model=list[KnowledgeBaseFileResponse], summary="List local knowledge files")
