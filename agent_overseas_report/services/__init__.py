@@ -1,5 +1,19 @@
 """Reusable service integrations for the agent overseas report project."""
 
+from .web_research_service import (
+    DEFAULT_WEB_RESEARCH_TOPICS,
+    DefaultWebResearchService,
+    InMemoryWebResearchSourceRepository,
+    WebResearchRequest,
+    WebResearchResult,
+    WebResearchService,
+    WebResearchSource,
+    WebResearchSourceRepository,
+    WebResearchTask,
+    WebResearchTopic,
+    WebSearchClient,
+    WebSearchResult,
+)
 from .rule_engine import OverseasRuleEngine
 from .generation_readiness import GenerationReadinessStatus, assess_generation_readiness
 from .generation_service import (
@@ -37,6 +51,18 @@ from .llm_service import (
 )
 
 __all__ = [
+    "DEFAULT_WEB_RESEARCH_TOPICS",
+    "DefaultWebResearchService",
+    "InMemoryWebResearchSourceRepository",
+    "WebResearchRequest",
+    "WebResearchResult",
+    "WebResearchService",
+    "WebResearchSource",
+    "WebResearchSourceRepository",
+    "WebResearchTask",
+    "WebResearchTopic",
+    "WebSearchClient",
+    "WebSearchResult",
     "OverseasRuleEngine",
     "GenerationReadinessStatus",
     "assess_generation_readiness",

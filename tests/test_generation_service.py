@@ -709,3 +709,59 @@ def test_generation_prompt_includes_retrieved_context_without_replacing_main_flo
     assert "germany-market.txt" in llm.prompts[0][0]
     assert "RAG 只作为上下文增强" in llm.prompts[0][0]
     assert response.project["metadata"]["retrieved_context"][0]["chunk_id"] == "chunk-1"
+
+
+class FakeWebResearchService:
+    def __init__(self):
+        self.requests = []
+
+    def research(self, request):
+        from agent_overseas_report.services.web_research_service import WebResearchResult, WebResearchSource
+        from agent_overseas_report.models.overseas_generation import utc_now
+
+        self.requests.append(request)
+        now = utc_now()
+        return WebResearchResult(
+            sources=[
+                WebResearchSource(
+                    id="wrs-1",
+                    query="德国 医疗器械 market size official report",
+                    title="Official medical devices market report",
+                    url="https://trade.gov/medical-devices",
+                    snippet="Public source snippet",
+                    source_domain="trade.gov",
+                    publish_date="2026-01-01",
+                    retrieved_at=now,
+                    reliability_score=0.95,
+                    source_type="official_government_or_multilateral",
+                    related_enterprise_id="ent-1",
+                    related_product_id=None,
+                    related_country="德国",
+                    related_industry="医疗器械",
+                )
+            ],
+            manual_review_items=[],
+            retrieved_at=now,
+        )
+
+
+def test_generation_service_runs_web_research_when_local_context_is_insufficient():
+    llm = FakeLLM([json.dumps({"sections": REQUIRED_SECTIONS}, ensure_ascii=False)])
+    web_research = FakeWebResearchService()
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm, web_research_service=web_research)
+
+    response = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    assert response.project["generation_status"] == "completed"
+    assert len(web_research.requests) == 1
+    assert response.project["metadata"]["web_research"]["source_count"] == 1
+    assert "trade.gov" in llm.prompts[0][0]
+    assert "retrieved_at" in llm.prompts[0][0]
