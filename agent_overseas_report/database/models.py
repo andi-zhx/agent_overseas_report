@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -27,24 +27,58 @@ class TimestampStatusMetadataMixin:
 
 
 class EnterpriseORM(TimestampStatusMetadataMixin, Base):
-    """Enterprise master data used by the generation service."""
+    """Structured enterprise master data used by overseas-report generation."""
 
     __tablename__ = "enterprises"
 
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    industry: Mapped[str | None] = mapped_column(String(128))
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    unified_social_credit_code: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
+    industry: Mapped[str | None] = mapped_column(String(128), index=True)
+    enterprise_nature: Mapped[str | None] = mapped_column(String(64))
+    established_at: Mapped[date | None] = mapped_column(Date)
+    region: Mapped[str | None] = mapped_column(String(128), index=True)
+    main_business: Mapped[str | None] = mapped_column(Text)
+    core_products: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    annual_revenue_range: Mapped[str | None] = mapped_column(String(128))
+    export_experience: Mapped[str | None] = mapped_column(Text)
+    current_export_countries: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    capacity_status: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    certifications: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    financing_needs: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    overseas_goals: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    investment_profile: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    market_entry_preferences: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    channel_requirements: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    expansion_plan: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
     payload: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
 
-    products: Mapped[list[ProductORM]] = relationship(back_populates="enterprise")
+    products: Mapped[list[ProductORM]] = relationship(back_populates="enterprise", cascade="all, delete-orphan")
 
 
 class ProductORM(TimestampStatusMetadataMixin, Base):
-    """Product master data linked to an enterprise."""
+    """Structured product master data linked to one enterprise."""
 
     __tablename__ = "products"
 
     enterprise_id: Mapped[str] = mapped_column(ForeignKey("enterprises.id"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    product_category: Mapped[str | None] = mapped_column(String(128), index=True)
+    hs_code: Mapped[str | None] = mapped_column(String(32), index=True)
+    application_scenarios: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    core_selling_points: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    technical_parameters: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    price_range: Mapped[str | None] = mapped_column(String(128))
+    moq: Mapped[str | None] = mapped_column(String(128))
+    capacity: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    certifications: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    target_customers: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    competitors: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    export_restrictions: Mapped[str | None] = mapped_column(Text)
+    compliance_requirements: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    investment_highlights: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    market_entry_notes: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    channel_fit: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
+    financing_expansion_assumptions: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
     payload: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
 
     enterprise: Mapped[EnterpriseORM] = relationship(back_populates="products")
