@@ -108,7 +108,7 @@ def test_generation_service_repairs_invalid_json_once():
     assert "校验失败原因" in llm.prompts[1][0]
 
 
-def test_generation_service_persists_failed_status_error_and_audit_log():
+def test_generation_service_persists_fallback_status_metadata_and_audit_log():
     llm = FakeLLM(["not-json", "still-not-json"])
     service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
 
@@ -122,10 +122,10 @@ def test_generation_service_persists_failed_status_error_and_audit_log():
         )
     )
 
-    assert response.project["generation_status"] == "failed"
-    assert "error_reason" in response.project["metadata"]
-    assert response.audit_log["success"] is False
-    assert "DeepSeek JSON validation failed" in response.audit_log["error_reason"]
+    assert response.project["generation_status"] == "completed"
+    assert response.project["metadata"]["json_fallback_used"] is True
+    assert response.audit_log["success"] is True
+    assert response.preview["version"] == "fallback-v1"
 
 
 def test_regenerate_creates_new_version_without_overwriting_history():
@@ -543,3 +543,123 @@ def test_content_versions_track_ai_edit_restore_and_final_version(tmp_path):
 
     assert "重新生成诊断" in document_xml
     assert "用户编辑诊断" not in document_xml
+
+
+def test_generation_service_falls_back_when_json_repair_fails():
+    llm = FakeLLM(["not-json", "still-not-json"])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+
+    response = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    assert response.project["generation_status"] == "completed"
+    assert response.project["metadata"]["json_fallback_used"] is True
+    assert response.preview["version"] == "fallback-v1"
+    assert response.preview["sections"]["04_overseas_resource_matching_plan"]["resources"][0]["resource_name"] == "待补充/需人工确认"
+    assert any("需人工复核" in item for item in response.preview["global_manual_review_items"])
+
+
+def test_generation_service_safety_guards_mark_dynamic_info_and_sanitize_unverified_resources():
+    payload = json.dumps(
+        {
+            "sections": {
+                **REQUIRED_SECTIONS,
+                "02_overseas_market_selection": {
+                    "title": "02 海外市场选择",
+                    "entry_reasons_by_country": [
+                        {
+                            "country": "德国",
+                            "entry_reasons": ["德国医疗器械市场规模持续增长"],
+                            "manual_review_notes": [],
+                        }
+                    ],
+                },
+                "04_overseas_resource_matching_plan": {
+                    "title": "04 资源匹配",
+                    "resources": [
+                        {
+                            "resource_type": "渠道代理商",
+                            "country_region": "德国",
+                            "resource_name": "不存在的代理商A",
+                            "contact_email": "fake@example.com",
+                            "website_url": "https://fake.example.com",
+                            "purpose": "渠道验证",
+                        }
+                    ],
+                },
+            }
+        },
+        ensure_ascii=False,
+    )
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+
+    response = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    market_reason = response.preview["sections"]["02_overseas_market_selection"]["entry_reasons_by_country"][0]["entry_reasons"][0]
+    resource = response.preview["sections"]["04_overseas_resource_matching_plan"]["resources"][0]
+    assert market_reason.endswith("（需人工复核）")
+    assert resource["resource_name"] == "待补充/需人工确认"
+    assert resource["contact_email"] == "需人工确认"
+    assert resource["website_url"] == "需人工确认"
+    assert "未在资源库中核验" in resource["notes"]
+    assert "不存在的代理商A" not in json.dumps(response.preview, ensure_ascii=False)
+
+
+def test_all_core_audit_actions_are_recorded_without_sensitive_body(tmp_path):
+    first_payload = json.dumps({"sections": REQUIRED_SECTIONS, "sensitive_body": "完整敏感正文"}, ensure_ascii=False)
+    regenerated_payload = json.dumps({"sections": REQUIRED_SECTIONS}, ensure_ascii=False)
+    llm = FakeLLM([first_payload, regenerated_payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+    generation = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+    service.view_plan_detail(generation.project["id"], user_id="user-1")
+    regenerated = service.regenerate(generation.project["id"], generated_by="user-2")
+    service.update_generated_content(regenerated.project["id"], result={"sections": REQUIRED_SECTIONS, "sensitive_body": "编辑后敏感正文"}, edited_by="user-3")
+
+    from agent_overseas_report.services import ExcelExportKind, ExcelExportRequest, PPTExportRequest, WordExportRequest
+
+    service.export_word(WordExportRequest(project_id=regenerated.project["id"], exported_by="user-4", output_dir=tmp_path))
+    service.export_ppt(PPTExportRequest(project_id=regenerated.project["id"], exported_by="user-4", output_dir=tmp_path))
+    service.export_excel(ExcelExportRequest(project_id=regenerated.project["id"], exported_by="user-4", export_kind=ExcelExportKind.ACTION_PLAN, output_dir=tmp_path))
+    service.export_excel(ExcelExportRequest(project_id=regenerated.project["id"], exported_by="user-4", export_kind=ExcelExportKind.RESOURCE_LIST, output_dir=tmp_path))
+
+    logs = [log.to_dict() for log in service.store.list_audit_logs()]
+    actions = [log["action_type"] for log in logs]
+    for expected in [
+        "create_plan",
+        "ai_generate_plan",
+        "view_plan_detail",
+        "regenerate_plan",
+        "edit_ai_content",
+        "export_word",
+        "export_ppt",
+        "export_excel_action_plan",
+        "export_resource_list",
+    ]:
+        assert expected in actions
+    serialized_logs = json.dumps(logs, ensure_ascii=False)
+    assert "完整敏感正文" not in serialized_logs
+    assert "编辑后敏感正文" not in serialized_logs
