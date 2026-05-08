@@ -36,6 +36,7 @@ from agent_overseas_report.schemas.overseas_plan_output_schema import (
 from agent_overseas_report.services.llm_service import LLMServiceError
 from agent_overseas_report.services.report_context_builder import ReportContextBuilder
 from agent_overseas_report.services.generation_readiness import assess_generation_readiness
+from agent_overseas_report.services.report_quality_scoring_service import ReportQualityScore, ReportQualityScoringService
 from agent_overseas_report.services.rule_engine import OverseasRuleEngine
 from agent_overseas_report.services.web_research_service import WebResearchRequest, WebResearchService, WebResearchTask
 from agent_overseas_report.services.excel_export_service import ExcelExportRequest, ExcelExportResult, export_overseas_plan_excel
@@ -285,6 +286,7 @@ class InMemoryGenerationStore:
         self._projects: dict[str, GenerationProject] = {}
         self._versions: dict[str, list[PlanContentVersion]] = {}
         self._audit_logs: list[OverseasPlanAuditLog] = []
+        self._quality_scores: list[ReportQualityScore] = []
 
     def next_version(self, enterprise_id: str) -> int:
         versions = [project.version for project in self._projects.values() if project.enterprise_id == enterprise_id]
@@ -379,6 +381,17 @@ class InMemoryGenerationStore:
             logs = [log for log in logs if log.plan_id == project_id or log.project_id == project_id]
         return copy.deepcopy(logs)
 
+    def save_report_quality_score(self, score: ReportQualityScore) -> ReportQualityScore:
+        saved = copy.deepcopy(score)
+        self._quality_scores.append(saved)
+        return copy.deepcopy(saved)
+
+    def get_latest_report_quality_score(self, project_id: str) -> ReportQualityScore | None:
+        scores = [score for score in self._quality_scores if score.project_id == project_id]
+        if not scores:
+            return None
+        return copy.deepcopy(max(scores, key=lambda item: item.created_at))
+
 
 @dataclass(slots=True)
 class OverseasPlanGenerationService:
@@ -392,6 +405,7 @@ class OverseasPlanGenerationService:
     knowledge_retriever: KnowledgeRetriever | None = None
     web_research_service: WebResearchService | None = None
     context_builder: ReportContextBuilder = field(default_factory=ReportContextBuilder)
+    quality_scoring_service: ReportQualityScoringService = field(default_factory=ReportQualityScoringService)
 
     def __post_init__(self) -> None:
         if self.rule_engine is None:
@@ -601,6 +615,15 @@ class OverseasPlanGenerationService:
                 content_json=parsed_output,
             )
             project.metadata["current_version_number"] = content_version.version_number
+            quality_score = self._score_and_persist_report_quality(
+                project=project,
+                version_number=content_version.version_number,
+                context_bundle=context_bundle_payload,
+            )
+            quality_payload = quality_score.to_dict()
+            project.metadata["quality_review"] = quality_payload
+            project.metadata["quality_status"] = quality_score.status.value
+            project.metadata["quality_score"] = quality_score.total_score
             success = True
         except Exception as exc:  # noqa: BLE001 - persist any orchestration failure for frontend visibility.
             error_reason = str(exc)
@@ -1073,6 +1096,38 @@ class OverseasPlanGenerationService:
                 error_message=str(exc),
             )
             raise
+
+    def _score_and_persist_report_quality(
+        self,
+        *,
+        project: GenerationProject,
+        version_number: int | None,
+        context_bundle: dict[str, Any],
+    ) -> ReportQualityScore:
+        """Run automatic delivery-quality scoring and persist the result."""
+
+        report_payload = project.result if isinstance(project.result, dict) else {}
+        score = self.quality_scoring_service.score_report(
+            report=report_payload,
+            project_id=project.id,
+            version_number=version_number,
+            context_bundle=context_bundle,
+        )
+        if hasattr(self.store, "save_report_quality_score"):
+            return self.store.save_report_quality_score(score)
+        return score
+
+    def get_report_quality_score(self, project_id: str) -> dict[str, Any] | None:
+        """Return the latest automatic quality score for QualityReviewAgent/API callers."""
+
+        if hasattr(self.store, "get_latest_report_quality_score"):
+            score = self.store.get_latest_report_quality_score(project_id)
+            return score.to_dict() if score else None
+        project = self.store.get_project(project_id)
+        if project is None:
+            return None
+        quality_review = project.metadata.get("quality_review") if isinstance(project.metadata, dict) else None
+        return copy.deepcopy(quality_review) if isinstance(quality_review, dict) else None
 
     def _append_content_version(
         self,

@@ -212,6 +212,20 @@ class OverseasAuditLogORM(TimestampStatusMetadataMixin, Base):
     file_path: Mapped[str | None] = mapped_column(Text)
 
 
+class ReportQualityScoreORM(TimestampStatusMetadataMixin, Base):
+    """Persisted automatic report quality scoring result."""
+
+    __tablename__ = "report_quality_scores"
+
+    project_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    total_score: Mapped[float] = mapped_column(Float, nullable=False)
+    quality_status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    dimension_scores: Mapped[list[dict[str, Any]]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    issues: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    suggestions: Mapped[list[str]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+
+
 class ReportExportORM(TimestampStatusMetadataMixin, Base):
     """Exported report file records."""
 

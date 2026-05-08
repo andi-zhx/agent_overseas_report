@@ -768,3 +768,26 @@ def test_generation_service_runs_web_research_when_local_context_is_insufficient
     assert response.project["metadata"]["web_research"]["source_count"] == 1
     assert "trade.gov" in llm.prompts[0][0]
     assert "retrieved_at" in llm.prompts[0][0]
+
+
+def test_generation_service_automatically_scores_report_quality() -> None:
+    llm = FakeLLM([json.dumps({"sections": REQUIRED_SECTIONS}, ensure_ascii=False)])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+
+    response = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    quality_review = response.project["metadata"]["quality_review"]
+    assert quality_review["total_score"] < 75
+    assert quality_review["status"] in {"needs_revision", "failed_quality_check"}
+    assert quality_review["issues"]
+    assert quality_review["suggestions"]
+    assert response.project["metadata"]["quality_status"] == quality_review["status"]
+    assert service.get_report_quality_score(response.project["id"])["id"] == quality_review["id"]

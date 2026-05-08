@@ -144,3 +144,4 @@ def test_generation_service_uses_crewai_only_when_env_flag_enabled(monkeypatch):
     assert "不得自行访问数据库" in llm.prompts[0][0]
     assert "QualityReviewAgent" in llm.prompts[7][1]
     assert "revision_required" in llm.prompts[7][0]
+    assert "automatic_quality_scoring_result" in llm.prompts[7][0]
