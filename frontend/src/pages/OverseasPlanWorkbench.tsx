@@ -99,12 +99,33 @@ export type GenerationReadiness = {
   manualReviewRequired: boolean;
 };
 
+export type ReportDepth = "basic" | "standard" | "investment_analyst";
+
+export type DataSourceItem = {
+  id: string;
+  name: string;
+  type: "企业库" | "产品库" | "本地知识库" | "网络研究" | "人工编辑";
+  url?: string;
+  updatedAt?: string;
+};
+
+export type QualityScore = {
+  overall: number;
+  completeness: number;
+  evidence: number;
+  feasibility: number;
+  riskCoverage: number;
+  comment?: string;
+};
+
 export type GeneratedPlan = {
   projectId?: string;
   sections: EditableSections;
   countryMatrix: CountryMatrixItem[];
   roadmap: RoadmapItem[];
   dataQualityReview?: GenerationReadiness;
+  dataSources?: DataSourceItem[];
+  qualityScore?: QualityScore;
   currentVersionNumber?: number;
   versions?: PlanVersionRecord[];
 };
@@ -114,8 +135,11 @@ export type GeneratePlanPayload = {
   productIds: string[];
   selectedIndustry: string;
   targetCountries: string[];
-  generationReadiness?: GenerationReadiness;
+  reportDepth: ReportDepth;
+  useLocalKnowledgeBase: boolean;
+  useWebResearch: boolean;
   continueOnValidationWarning?: boolean;
+  generationReadiness?: GenerationReadiness;
 };
 
 export type ExportType = "word" | "ppt" | "excel" | "resources";
@@ -126,11 +150,13 @@ export type OverseasPlanWorkbenchProps = {
   industries?: Option[];
   countries?: Option[];
   currentUserId?: string;
+  apiBaseUrl?: string;
   onGenerate?: (payload: GeneratePlanPayload) => Promise<GeneratedPlan>;
   onSaveDraft?: (draft: GeneratePlanPayload & { sections: EditableSections }) => Promise<void>;
   onExport?: (type: ExportType, plan: GeneratedPlan) => Promise<void>;
   onRestoreVersion?: (version: PlanVersionRecord, plan: GeneratedPlan) => Promise<GeneratedPlan | void>;
   onMarkFinalVersion?: (version: PlanVersionRecord, plan: GeneratedPlan) => Promise<PlanVersionRecord | void>;
+  onOpenAuditLog?: (projectId?: string) => void;
 };
 
 const sectionTabs: Array<{ key: PlanSectionKey; label: string }> = [
@@ -198,6 +224,12 @@ const defaultIndustries: Option[] = [
   { id: "consumer-electronics", name: "消费电子" },
 ];
 
+const reportDepthOptions: Array<{ id: ReportDepth; name: string; description: string }> = [
+  { id: "basic", name: "基础版", description: "快速生成关键建议与行动清单" },
+  { id: "standard", name: "标准版", description: "补充市场、渠道、资源与路线图" },
+  { id: "investment_analyst", name: "投资分析师版", description: "强化财务、风险、竞争与投资判断" },
+];
+
 const defaultCountries: Option[] = [
   { id: "DE", name: "德国" },
   { id: "US", name: "美国" },
@@ -214,48 +246,6 @@ const emptySections: EditableSections = {
   exhibitionMarketing: "等待生成展会与推广计划。",
   financingCapacity: "等待生成投融资与扩产规划。",
   roadmap: "等待生成12-24个月路线图。",
-};
-
-const buildPreviewPlan = (enterprise: EnterpriseProfile | undefined, countries: string[]): GeneratedPlan => {
-  const countryNames = countries.length > 0 ? countries : ["德国", "美国", "阿联酋"];
-
-  const createdAt = new Date().toISOString();
-  const previewPlan: GeneratedPlan = {
-    projectId: `preview-${Date.now()}`,
-    sections: {
-      enterpriseDiagnosis: `${enterprise?.name ?? "所选企业"}已具备基础产品与认证能力，建议优先补齐目标国准入、英文销售素材和本地售后网络。`,
-      marketSelection: `建议优先评估${countryNames.join("、")}，按市场需求、政策准入、渠道成熟度和供应链适配度形成分层进入节奏。`,
-      entryModeDesign: "第一阶段采用经销商+行业展会获客，第二阶段导入本地服务伙伴，第三阶段评估海外仓或轻量本地化组装。",
-      resourceMatching: "重点对接当地行业协会、检测认证机构、头部经销商、物流仓储服务商和投促机构，形成可跟进清单。",
-      exhibitionMarketing: "围绕年度行业展会、线上研讨会、LinkedIn内容矩阵和重点客户拜访制定季度推广节奏。",
-      financingCapacity: "根据目标市场备货、认证、渠道保证金和售后备件需求，设计分阶段预算与产能扩充方案。",
-      roadmap: "1-3个月完成资料补齐与国家筛选；3-6个月完成认证和渠道验证；6-12个月形成样板客户；12-24个月推进规模化复制。",
-    },
-    countryMatrix: countryNames.map((country, index) => ({
-      country,
-      marketPotential: Math.max(62, 90 - index * 8),
-      entryDifficulty: Math.min(82, 48 + index * 11),
-      priority: index === 0 ? "优先进入" : index === 1 ? "重点验证" : "机会储备",
-      recommendation: index === 0 ? "渠道试点+展会获客" : "先做准入验证和伙伴筛选",
-    })),
-    roadmap: [
-      { period: "1-3个月", title: "诊断与准备", actions: ["补齐认证/素材缺口", "完成目标国家优先级排序"], owner: "海外业务负责人" },
-      { period: "3-6个月", title: "渠道验证", actions: ["对接经销商和认证机构", "启动小批量样品测试"], owner: "销售与产品团队" },
-      { period: "6-9个月", title: "样板客户", actions: ["完成首批订单", "沉淀本地售后流程"], owner: "区域经理" },
-      { period: "9-12个月", title: "规模复制", actions: ["扩大渠道覆盖", "建立季度推广机制"], owner: "增长团队" },
-      { period: "12-24个月", title: "本地化布局", actions: ["评估海外仓/服务中心", "规划扩产与融资节点"], owner: "管理层" },
-    ],
-  };
-  previewPlan.currentVersionNumber = 1;
-  previewPlan.versions = [{
-    version_number: 1,
-    created_by: "AI",
-    created_at: createdAt,
-    generation_source: "AI生成",
-    change_summary: "AI首次生成方案",
-    content_json: { sections: previewPlan.sections, countryMatrix: previewPlan.countryMatrix, roadmap: previewPlan.roadmap },
-  }];
-  return previewPlan;
 };
 
 const createLocalVersion = (
@@ -375,16 +365,23 @@ export default function OverseasPlanWorkbench({
   industries = defaultIndustries,
   countries = defaultCountries,
   currentUserId = "current-user",
+  apiBaseUrl = "",
   onGenerate,
   onSaveDraft,
   onExport,
   onRestoreVersion,
   onMarkFinalVersion,
+  onOpenAuditLog,
 }: OverseasPlanWorkbenchProps) {
   const [enterpriseId, setEnterpriseId] = useState(enterprises[0]?.id ?? "");
   const [productIds, setProductIds] = useState<string[]>([]);
   const [industryId, setIndustryId] = useState(industries[0]?.id ?? "");
   const [targetCountryIds, setTargetCountryIds] = useState<string[]>([]);
+  const [reportDepth, setReportDepth] = useState<ReportDepth>("standard");
+  const [useLocalKnowledgeBase, setUseLocalKnowledgeBase] = useState(true);
+  const [useWebResearch, setUseWebResearch] = useState(false);
+  const [allowMissingFields, setAllowMissingFields] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(0);
   const [activeTab, setActiveTab] = useState<PlanSectionKey>("enterpriseDiagnosis");
   const [plan, setPlan] = useState<GeneratedPlan>({ sections: emptySections, countryMatrix: [], roadmap: [] });
   const [loading, setLoading] = useState(false);
@@ -412,6 +409,10 @@ export default function OverseasPlanWorkbench({
     productIds,
     selectedIndustry,
     targetCountries: selectedCountryNames,
+    reportDepth,
+    useLocalKnowledgeBase,
+    useWebResearch,
+    continueOnValidationWarning: allowMissingFields,
     generationReadiness: readiness,
   };
 
@@ -427,17 +428,48 @@ export default function OverseasPlanWorkbench({
     );
   };
 
+  const requestGeneration = async (generationPayload: GeneratePlanPayload) => {
+    if (onGenerate) {
+      return onGenerate(generationPayload);
+    }
+
+    const response = await fetch(`${apiBaseUrl}/api/overseas-plans/generations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enterprise_id: generationPayload.enterpriseId,
+        product_ids: generationPayload.productIds,
+        selected_industry: generationPayload.selectedIndustry,
+        target_countries: generationPayload.targetCountries,
+        report_depth: generationPayload.reportDepth,
+        use_local_knowledge_base: generationPayload.useLocalKnowledgeBase,
+        use_web_research: generationPayload.useWebResearch,
+        continue_on_validation_warning: generationPayload.continueOnValidationWarning,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`方案生成接口异常：${response.status}`);
+    }
+
+    return response.json() as Promise<GeneratedPlan>;
+  };
+
   const runGenerate = async (continueOnValidationWarning = false) => {
     setLoading(true);
+    setGenerationProgress(12);
     try {
       const generationPayload = { ...payload, continueOnValidationWarning };
-      const nextPlan = onGenerate ? await onGenerate(generationPayload) : await new Promise<GeneratedPlan>((resolve) => {
-        window.setTimeout(() => resolve({ ...buildPreviewPlan(selectedEnterprise, selectedCountryNames), dataQualityReview: readiness }), 700);
-      });
-      setPlan(ensureVersionHistory(nextPlan, currentUserId, "AI生成"));
-      setPreviewVersionNumber(nextPlan.currentVersionNumber ?? nextPlan.versions?.[nextPlan.versions.length - 1]?.version_number ?? null);
+      setGenerationProgress(35);
+      const nextPlan = await requestGeneration(generationPayload);
+      setGenerationProgress(82);
+      const nextPlanWithHistory = ensureVersionHistory(nextPlan, currentUserId, "AI生成");
+      setPlan(nextPlanWithHistory);
+      setPreviewVersionNumber(nextPlanWithHistory.currentVersionNumber ?? nextPlanWithHistory.versions?.[nextPlanWithHistory.versions.length - 1]?.version_number ?? null);
+      setGenerationProgress(100);
       setNotice(continueOnValidationWarning || readiness.manualReviewRequired ? "方案已生成，并已标记需人工补充/复核。" : "方案已生成，可在预览区编辑后导出，也可进入版本记录查看历史。");
     } catch (generateError) {
+      setGenerationProgress(0);
       setError(generateError instanceof Error ? generateError.message : "方案生成失败，请稍后重试。");
     } finally {
       setLoading(false);
@@ -447,11 +479,11 @@ export default function OverseasPlanWorkbench({
   const handleGenerate = async () => {
     setError("");
     setNotice("");
-    if (readiness.shouldPopup) {
+    if (readiness.shouldPopup && !allowMissingFields) {
       setPendingSevereReadiness(readiness);
       return;
     }
-    await runGenerate(false);
+    await runGenerate(allowMissingFields);
   };
 
   const handleContinueGenerate = async () => {
@@ -479,7 +511,17 @@ export default function OverseasPlanWorkbench({
   const handleExport = async (type: ExportType) => {
     setError("");
     try {
-      await onExport?.(type, plan);
+      if (onExport) {
+        await onExport(type, plan);
+      } else {
+        if (!plan.projectId) {
+          throw new Error("请先生成报告后再导出。");
+        }
+        const response = await fetch(`${apiBaseUrl}/api/overseas-plans/${plan.projectId}/exports/${type}`, { method: "POST" });
+        if (!response.ok) {
+          throw new Error(`导出接口异常：${response.status}`);
+        }
+      }
       setNotice("导出任务已提交，请在下载中心查看生成文件。");
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "导出失败，请稍后重试。");
@@ -594,6 +636,46 @@ export default function OverseasPlanWorkbench({
           </div>
         </fieldset>
       </section>
+      <section className="options-panel" aria-label="生成策略配置">
+        <div>
+          <p className="card-label">报告深度</p>
+          <div className="depth-options">
+            {reportDepthOptions.map((depth) => (
+              <button key={depth.id} type="button" className={reportDepth === depth.id ? "depth-card depth-card--active" : "depth-card"} onClick={() => setReportDepth(depth.id)}>
+                <strong>{depth.name}</strong>
+                <span>{depth.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="switch-list">
+          <label className="switch-row">
+            <input type="checkbox" checked={useLocalKnowledgeBase} onChange={(event) => setUseLocalKnowledgeBase(event.target.checked)} />
+            <span>启用本地知识库</span>
+            <small>由后端检索企业资料、模板与历史案例</small>
+          </label>
+          <label className="switch-row">
+            <input type="checkbox" checked={useWebResearch} onChange={(event) => setUseWebResearch(event.target.checked)} />
+            <span>启用网络研究</span>
+            <small>由后端联网补充公开市场信息与引用来源</small>
+          </label>
+          <label className="switch-row">
+            <input type="checkbox" checked={allowMissingFields} onChange={(event) => setAllowMissingFields(event.target.checked)} />
+            <span>允许缺失字段继续生成</span>
+            <small>方案会提示需人工复核，前端不补造缺失数据</small>
+          </label>
+        </div>
+      </section>
+
+      {(loading || generationProgress > 0) && (
+        <section className="progress-card" aria-label="生成进度展示">
+          <div className="section-heading"><h2>生成进度</h2><span>{loading ? "后端任务处理中" : "已完成"}</span></div>
+          <div className="progress-bar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={generationProgress} role="progressbar">
+            <span style={{ width: `${generationProgress}%` }} />
+          </div>
+          <p>{generationProgress < 35 ? "提交生成参数..." : generationProgress < 82 ? "等待后端编排知识库/联网研究与报告生成..." : generationProgress < 100 ? "接收并渲染报告结果..." : "生成完成"}</p>
+        </section>
+      )}
 
       {error && <div className="alert alert--error">{error}</div>}
       {notice && <div className="alert alert--success">{notice}</div>}
@@ -639,9 +721,12 @@ export default function OverseasPlanWorkbench({
           <h2>当前版本：v{plan.currentVersionNumber ?? "--"}</h2>
           <p>每次AI生成、重新生成和用户保存编辑都会保留历史版本；导出默认使用最终版，没有最终版时使用最新完成版。</p>
         </div>
-        <button type="button" className="button button--secondary" onClick={() => setShowVersionPanel((open) => !open)}>
-          {showVersionPanel ? "收起版本记录" : "查看版本记录"}
-        </button>
+        <div className="version-entry-card__actions">
+          <button type="button" className="button button--secondary" onClick={() => setShowVersionPanel((open) => !open)}>
+            {showVersionPanel ? "收起版本记录" : "查看版本记录"}
+          </button>
+          <button type="button" className="button button--secondary" onClick={() => onOpenAuditLog?.(plan.projectId)}>审计日志入口</button>
+        </div>
       </section>
 
       {showVersionPanel && (
@@ -666,6 +751,7 @@ export default function OverseasPlanWorkbench({
 
       <section className="preview-grid">
         <article className="preview-card">
+          <div className="section-heading"><h2>报告结果预览 / 人工编辑</h2><span>{isViewingHistoricalVersion ? "历史版本只读" : "当前版本可编辑"}</span></div>
           <div className="tab-list" role="tablist">
             {sectionTabs.map((tab) => (
               <button key={tab.key} type="button" role="tab" aria-selected={activeTab === tab.key} className={activeTab === tab.key ? "tab tab--active" : "tab"} onClick={() => setActiveTab(tab.key)}>
@@ -685,6 +771,33 @@ export default function OverseasPlanWorkbench({
           <button type="button" onClick={() => handleExport("excel")}>导出Excel行动计划表</button>
           <button type="button" onClick={() => handleExport("resources")}>导出资源对接清单</button>
         </aside>
+      </section>
+
+
+      <section className="insight-grid" aria-label="数据来源和质量评分">
+        <article className="source-card">
+          <div className="section-heading"><h2>数据来源展示</h2><span>{useWebResearch ? "含联网研究" : "未启用联网研究"}</span></div>
+          {(visiblePlan.dataSources ?? []).map((source) => (
+            <div className="source-item" key={source.id}>
+              <strong>{source.name}</strong>
+              <span>{source.type}{source.updatedAt ? ` · ${source.updatedAt}` : ""}</span>
+              {source.url && <a href={source.url} target="_blank" rel="noreferrer">查看来源</a>}
+            </div>
+          ))}
+          {(visiblePlan.dataSources ?? []).length === 0 && <div className="empty-state">生成方案后由后端返回引用来源、知识库命中文档和人工编辑记录。</div>}
+        </article>
+        <article className="quality-card">
+          <div className="section-heading"><h2>质量评分展示</h2><span>{visiblePlan.qualityScore ? `${visiblePlan.qualityScore.overall}/100` : "待评分"}</span></div>
+          {visiblePlan.qualityScore ? (
+            <dl className="quality-list">
+              <div><dt>完整度</dt><dd>{visiblePlan.qualityScore.completeness}</dd></div>
+              <div><dt>证据充分性</dt><dd>{visiblePlan.qualityScore.evidence}</dd></div>
+              <div><dt>落地可行性</dt><dd>{visiblePlan.qualityScore.feasibility}</dd></div>
+              <div><dt>风险覆盖</dt><dd>{visiblePlan.qualityScore.riskCoverage}</dd></div>
+              {visiblePlan.qualityScore.comment && <div className="quality-list__comment"><dt>评分说明</dt><dd>{visiblePlan.qualityScore.comment}</dd></div>}
+            </dl>
+          ) : <div className="empty-state">生成方案后展示后端质量评分，不在前端计算评分。</div>}
+        </article>
       </section>
 
       <section className="matrix-card">
