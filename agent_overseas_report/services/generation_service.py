@@ -331,7 +331,7 @@ class OverseasPlanGenerationService:
 
     data_repository: EnterpriseDataRepository
     llm_client: PlanLLMClient
-    store: InMemoryGenerationStore = field(default_factory=InMemoryGenerationStore)
+    store: Any = field(default_factory=InMemoryGenerationStore)
     template_repository: KnowledgeBaseTemplateRepository = field(default_factory=get_default_template_repository)
     rule_engine: OverseasRuleEngine | None = None
 
