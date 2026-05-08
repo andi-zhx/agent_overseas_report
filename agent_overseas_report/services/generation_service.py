@@ -468,6 +468,7 @@ class OverseasPlanGenerationService:
             )
             raw_output = self.llm_client.generate_text(prompt_bundle.user_prompt, system_prompt=prompt_bundle.system_prompt)
             parsed_output = self._parse_validate_or_repair(raw_output, prompt_bundle, project, enterprise_data, rule_output)
+            parsed_output = _apply_plan_safety_guards(parsed_output)
 
             if project.metadata.get("continue_on_validation_warning") and readiness_report.manual_review_required:
                 parsed_output.setdefault("data_quality_review", readiness_report.to_dict())
@@ -487,6 +488,7 @@ class OverseasPlanGenerationService:
                     "rule_engine_output": rule_output,
                     "prompt_model": getattr(getattr(self.llm_client, "config", None), "model", None),
                     "json_repaired": project.metadata.get("json_repaired", False),
+                    "json_fallback_used": project.metadata.get("json_fallback_used", False),
                 }
             )
             content_version = self._append_content_version(
@@ -971,7 +973,10 @@ class OverseasPlanGenerationService:
                 project.metadata["json_repair_reason"] = str(first_exc)
                 return parsed
             except (GenerationValidationError, LLMServiceError) as second_exc:
-                raise GenerationValidationError(f"DeepSeek JSON validation failed after one repair retry: {second_exc}") from second_exc
+                project.metadata["json_repaired"] = False
+                project.metadata["json_fallback_used"] = True
+                project.metadata["json_fallback_reason"] = f"DeepSeek JSON validation failed after one repair retry: {second_exc}"
+                return _build_rule_based_fallback_payload(enterprise_data, rule_output, str(second_exc))
 
     def _parse_and_validate_json(self, raw_output: str) -> dict[str, Any]:
         try:
@@ -1128,6 +1133,238 @@ class OverseasPlanGenerationService:
             exported_by=getattr(request, "exported_by", None),
         )
 
+
+
+_DYNAMIC_REVIEW_KEYWORDS = ("政策", "关税", "市场规模", "增长率", "准入", "认证", "法规", "补贴", "招投标", "监管")
+_DYNAMIC_SKIP_KEYS = {"title", "report_title", "country", "country_name", "resource_name", "name", "organization", "institution", "company"}
+_RESOURCE_LIST_KEYS = ("resources", "resource_matches", "resource_list", "matching_resources")
+_RESOURCE_NAME_KEYS = ("resource_name", "name", "organization", "institution", "company")
+_RESOURCE_CONTACT_KEYS = ("contact", "contact_name", "contact_email", "contact_phone", "phone", "email", "website", "website_url")
+_VERIFIED_RESOURCE_SOURCES = {"verified_resource_library", "人工确认", "资源库已核验"}
+_UNVERIFIED_RESOURCE_NOTE = "具体资源名称/联系方式未在资源库中核验，需人工补充/复核"
+
+
+def _apply_plan_safety_guards(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply deterministic acceptance guards to DeepSeek output before saving.
+
+    The prompt already tells DeepSeek not to fabricate resource names/contact
+    details and to flag dynamic policy/tariff/market-size claims.  This
+    post-processor enforces those requirements when the provider response misses
+    them, keeping saved/exported content conservative and auditable.
+    """
+
+    guarded = copy.deepcopy(payload)
+    review_items: list[str] = []
+    if _mark_dynamic_info_manual_review(guarded):
+        review_items.append("政策、关税、准入、认证、市场规模等动态信息已标注“需人工复核”。")
+    if _sanitize_unverified_resources(guarded):
+        review_items.append("未核验的具体资源名称和联系方式已替换为待人工确认占位。")
+    if review_items:
+        existing = guarded.setdefault("global_manual_review_items", [])
+        if isinstance(existing, list):
+            for item in review_items:
+                if item not in existing:
+                    existing.append(item)
+        else:
+            guarded["global_manual_review_items"] = review_items
+    return guarded
+
+
+def _mark_dynamic_info_manual_review(value: Any, *, parent_key: str | None = None) -> bool:
+    changed = False
+    if isinstance(value, dict):
+        for key, item in list(value.items()):
+            if isinstance(item, str):
+                if _needs_dynamic_review_marker(item, key):
+                    value[key] = f"{item}（需人工复核）"
+                    changed = True
+            else:
+                changed = _mark_dynamic_info_manual_review(item, parent_key=key) or changed
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, str):
+                if _needs_dynamic_review_marker(item, parent_key):
+                    value[index] = f"{item}（需人工复核）"
+                    changed = True
+            else:
+                changed = _mark_dynamic_info_manual_review(item, parent_key=parent_key) or changed
+    return changed
+
+
+def _needs_dynamic_review_marker(text: str, key: str | None) -> bool:
+    if key in _DYNAMIC_SKIP_KEYS or "需人工复核" in text:
+        return False
+    # Avoid tagging short labels such as “准入准备期”; mark narrative claims only.
+    if len(text.strip()) < 10:
+        return False
+    return any(keyword in text for keyword in _DYNAMIC_REVIEW_KEYWORDS)
+
+
+def _sanitize_unverified_resources(payload: dict[str, Any]) -> bool:
+    changed = False
+    sections = payload.get("sections")
+    if isinstance(sections, dict):
+        resource_section = sections.get("04_overseas_resource_matching_plan")
+        if isinstance(resource_section, dict):
+            for key in _RESOURCE_LIST_KEYS:
+                if key in resource_section:
+                    changed = _sanitize_resource_collection(resource_section[key]) or changed
+            # Some models return grouped resource fields instead of a canonical
+            # list.  Sanitize every resource-shaped dict except plain metadata.
+            for key, item in resource_section.items():
+                if key not in {"title", "summary", "description", *_RESOURCE_LIST_KEYS}:
+                    changed = _sanitize_resource_collection(item) or changed
+    if "overseas_resource_matches" in payload:
+        changed = _sanitize_resource_collection(payload["overseas_resource_matches"]) or changed
+    return changed
+
+
+def _sanitize_resource_collection(value: Any) -> bool:
+    changed = False
+    if isinstance(value, list):
+        for item in value:
+            changed = _sanitize_resource_collection(item) or changed
+    elif isinstance(value, dict):
+        if _is_resource_row(value):
+            changed = _sanitize_resource_row(value) or changed
+        else:
+            for item in value.values():
+                changed = _sanitize_resource_collection(item) or changed
+    return changed
+
+
+def _is_resource_row(item: dict[str, Any]) -> bool:
+    keys = set(item)
+    return bool(keys & {*_RESOURCE_NAME_KEYS, *_RESOURCE_CONTACT_KEYS, "resource_type", "country_region", "suggested_contact", "purpose"})
+
+
+def _sanitize_resource_row(item: dict[str, Any]) -> bool:
+    if _is_verified_resource(item):
+        return False
+    changed = False
+    for key in _RESOURCE_NAME_KEYS:
+        if item.get(key):
+            item[key] = "待补充/需人工确认"
+            changed = True
+    for key in _RESOURCE_CONTACT_KEYS:
+        if item.get(key):
+            item[key] = "需人工确认"
+            changed = True
+    if changed:
+        notes = str(item.get("notes") or item.get("remark") or "")
+        if _UNVERIFIED_RESOURCE_NOTE not in notes:
+            item["notes"] = f"{notes}；{_UNVERIFIED_RESOURCE_NOTE}".strip("；")
+    return changed
+
+
+def _is_verified_resource(item: dict[str, Any]) -> bool:
+    if item.get("is_verified") is True or item.get("verified") is True:
+        return True
+    source = str(item.get("source") or item.get("data_source") or "")
+    return source in _VERIFIED_RESOURCE_SOURCES
+
+
+def _build_rule_based_fallback_payload(enterprise_data: dict[str, Any], rule_output: dict[str, Any], error_reason: str) -> dict[str, Any]:
+    enterprise = enterprise_data.get("enterprise") or {}
+    products = enterprise_data.get("products") or []
+    countries = enterprise_data.get("target_markets") or []
+    maturity = rule_output.get("maturity_assessment", {}) if isinstance(rule_output, dict) else {}
+    country_recommendation = rule_output.get("country_recommendation", {}) if isinstance(rule_output, dict) else {}
+    country_matrix = country_recommendation.get("country_priority_matrix", []) if isinstance(country_recommendation, dict) else []
+    channel_matches = rule_output.get("channel_matches", []) if isinstance(rule_output, dict) else []
+    resource_matches = rule_output.get("resource_matches", {}) if isinstance(rule_output, dict) else {}
+    missing_fields = rule_output.get("missing_fields", []) if isinstance(rule_output, dict) else []
+    product_names = [str(product.get("name") or product.get("product_name") or product.get("id")) for product in products if isinstance(product, dict)]
+
+    return {
+        "report_title": f"{enterprise.get('name') or enterprise.get('enterprise_name') or '企业'}出海方案（规则引擎降级版）",
+        "version": "fallback-v1",
+        "language": "zh-CN",
+        "data_quality_notes": [
+            "DeepSeek 输出 JSON 解析/修复失败，系统已启用规则引擎降级方案。",
+            f"降级原因：{error_reason}",
+            "本方案不包含未核验的具体机构名称、联系人、电话、邮箱或网址。",
+        ],
+        "global_manual_review_items": [
+            "AI JSON 解析失败后生成的降级方案需人工补充/复核。",
+            "政策、关税、准入、认证、市场规模等动态信息需人工复核。",
+        ],
+        "sections": {
+            "01_enterprise_diagnosis": {
+                "title": "01 企业现状诊断",
+                "enterprise_basic_profile": {
+                    "summary": f"企业行业：{enterprise.get('industry') or '待补充'}；产品：{'、'.join(product_names) or '待补充'}。",
+                    "key_facts": [f"目标国家/区域：{'、'.join(map(str, countries)) or '待补充'}"],
+                    "relevant_data_gaps": list(missing_fields),
+                },
+                "overseas_maturity_assessment": maturity,
+            },
+            "02_overseas_market_selection": {
+                "title": "02 海外市场选择",
+                "recommended_country_tiers": {
+                    "tier_1_primary": [item.get("country_name") for item in country_recommendation.get("primary_markets", []) if isinstance(item, dict)],
+                    "tier_2_secondary": [item.get("country_name") for item in country_recommendation.get("secondary_markets", []) if isinstance(item, dict)],
+                    "tier_3_long_term": [item.get("country_name") for item in country_recommendation.get("long_term_markets", []) if isinstance(item, dict)],
+                },
+                "country_priority_matrix": country_matrix,
+                "manual_review_notes": ["国家政策、关税、准入规则、市场规模和增长率需人工复核。"],
+            },
+            "03_entry_mode_design": {
+                "title": "03 出海模式设计",
+                "recommended_entry_modes": channel_matches[:5],
+                "channel_path_design": channel_matches[:5],
+            },
+            "04_overseas_resource_matching_plan": {
+                "title": "04 海外资源匹配方案",
+                "resources": _fallback_resource_rows(resource_matches),
+                "notes": ["仅输出资源类型和对接目的；具体资源名称与联系方式需人工确认。"],
+            },
+            "05_exhibition_and_marketing_plan": {
+                "title": "05 展会与营销计划",
+                "exhibition_recommendations": _as_fallback_list(resource_matches.get("展会") if isinstance(resource_matches, dict) else []),
+            },
+            "06_financing_and_capacity_expansion_plan": {
+                "title": "06 融资与产能扩张计划",
+                "financing_notes": ["结合企业预算、信用额度和目标市场投入节奏制定；具体融资政策需人工复核。"],
+            },
+            "07_12_24_month_implementation_roadmap": {
+                "title": "07 12-24个月实施路线图",
+                "roadmap": [
+                    {"stage": "0-3个月", "core_goal": "补齐基础资料与准入核验", "key_actions": ["补齐缺失字段", "人工复核政策/关税/认证要求", "形成渠道长名单"], "priority": "高", "status": "待启动"},
+                    {"stage": "3-12个月", "core_goal": "验证渠道与资源匹配", "key_actions": ["开展展会/协会/代理商对接", "完成样品或试单验证"], "priority": "中", "status": "待启动"},
+                    {"stage": "12-24个月", "core_goal": "规模化复制", "key_actions": ["沉淀本地服务资源", "评估海外仓/本地化布局"], "priority": "中", "status": "待启动"},
+                ],
+            },
+        },
+    }
+
+
+def _fallback_resource_rows(resource_matches: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if isinstance(resource_matches, dict):
+        for resource_type, items in resource_matches.items():
+            for item in _as_fallback_list(items):
+                row = item if isinstance(item, dict) else {"notes": item}
+                rows.append(
+                    {
+                        "resource_type": row.get("resource_type") or resource_type,
+                        "country_region": row.get("country_region") or row.get("country_name") or row.get("region") or "待确认",
+                        "resource_name": "待补充/需人工确认",
+                        "suggested_contact": row.get("suggested_contact") or row.get("resource_type") or resource_type,
+                        "purpose": row.get("purpose") or row.get("recommended_use") or row.get("explanation") or "对接验证资源适配性",
+                        "priority": row.get("priority") or "中",
+                        "notes": _UNVERIFIED_RESOURCE_NOTE,
+                    }
+                )
+    return rows or [{"resource_type": "资源类型", "resource_name": "待补充/需人工确认", "notes": _UNVERIFIED_RESOURCE_NOTE}]
+
+
+def _as_fallback_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
 
 def _source_from_extra_context(extra_context: dict[str, Any]) -> GenerationSource:
     if extra_context.get("generation_source") == GenerationSource.REGENERATED.value or extra_context.get("regenerated_from_project_id"):
