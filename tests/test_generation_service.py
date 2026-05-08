@@ -526,21 +526,44 @@ def test_excel_export_action_plan_creates_xlsx_and_writes_export_audit_log(tmp_p
 
     assert export.export_type == "Excel"
     assert export.export_kind == "action_plan"
-    assert export.sheet_name == "12-24个月行动计划表"
+    assert export.sheet_name == "12-24个月行动计划"
     assert export.file_path.endswith(".xlsx")
-    assert export.headers == ["阶段", "时间范围", "核心目标", "关键动作", "责任方", "所需资源", "交付物", "优先级", "状态", "备注"]
+    assert export.headers == ["阶段", "时间范围", "核心目标", "关键动作", "负责人", "所需资源", "交付物", "优先级", "状态", "备注"]
     assert export.rows[0]["阶段"] == "准入准备期"
     assert export.rows[0]["关键动作"] == "认证复核；渠道筛选"
 
     import zipfile
 
+    expected_sheets = [
+        "企业基础信息",
+        "产品基础信息",
+        "目标国家评分矩阵",
+        "渠道资源清单",
+        "展会与活动计划",
+        "认证与合规事项",
+        "预算测算",
+        "KPI跟踪表",
+        "12-24个月行动计划",
+        "风险清单",
+        "数据来源",
+        "人工复核清单",
+        "导出记录",
+    ]
+    assert export.sheet_names == expected_sheets
+    assert export.sheets["预算测算"]["headers"] == ["预算项目", "国家/地区", "阶段", "假设", "金额", "币种", "负责人", "备注"]
+    assert export.sheets["KPI跟踪表"]["headers"] == ["KPI指标", "目标值", "当前值", "数据来源", "统计周期", "负责人", "状态", "备注"]
+
     with zipfile.ZipFile(export.file_path) as xlsx:
-        sheet_xml = xlsx.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        workbook_xml = xlsx.read("xl/workbook.xml").decode("utf-8")
+        action_sheet_xml = xlsx.read("xl/worksheets/sheet9.xml").decode("utf-8")
         styles_xml = xlsx.read("xl/styles.xml").decode("utf-8")
 
-    assert "阶段" in sheet_xml
-    assert "准入准备期" in sheet_xml
-    assert "customWidth" in sheet_xml
+    for sheet_name in expected_sheets:
+        assert sheet_name in workbook_xml
+    assert "阶段" in action_sheet_xml
+    assert "准入准备期" in action_sheet_xml
+    assert "autoFilter" in action_sheet_xml
+    assert "customWidth" in action_sheet_xml
     assert "Microsoft YaHei" in styles_xml
 
     updated_project = service.store.get_project(generation.project["id"])
@@ -552,7 +575,7 @@ def test_excel_export_action_plan_creates_xlsx_and_writes_export_audit_log(tmp_p
     assert audit.exported_by == "user-2"
     assert audit.enterprise_id == "ent-1"
     assert audit.enterprise_name == "示例医疗科技"
-    assert audit.plan_name == "示例医疗科技12-24个月行动计划表"
+    assert audit.plan_name == "示例医疗科技项目执行管理总表"
     assert audit.export_type == "Excel"
     assert audit.file_path == export.file_path
 
@@ -606,7 +629,7 @@ def test_excel_export_resource_list_uses_placeholder_for_missing_resource_name(t
 
     assert export.export_type == "Excel"
     assert export.export_kind == "resource_list"
-    assert export.sheet_name == "海外资源对接清单"
+    assert export.sheet_name == "渠道资源清单"
     assert export.headers == ["资源类型", "国家/地区", "资源名称", "建议对接对象", "对接目的", "优先级", "所属阶段", "需要准备的材料", "当前状态", "备注"]
     assert export.rows[0]["资源名称"] == "待补充/需人工确认"
     assert export.rows[0]["需要准备的材料"] == "英文产品手册；CE证书"
@@ -614,15 +637,16 @@ def test_excel_export_resource_list_uses_placeholder_for_missing_resource_name(t
     import zipfile
 
     with zipfile.ZipFile(export.file_path) as xlsx:
-        sheet_xml = xlsx.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        sheet_xml = xlsx.read("xl/worksheets/sheet4.xml").decode("utf-8")
 
     assert "待补充/需人工确认" in sheet_xml
-    assert "海外资源对接清单" not in sheet_xml  # sheet title is in workbook.xml; sheet cells remain pure data table.
+    assert "autoFilter" in sheet_xml
+    assert "渠道资源清单" not in sheet_xml  # sheet title is in workbook.xml; sheet cells remain pure data table.
 
     updated_project = service.store.get_project(generation.project["id"])
     assert updated_project.output_excel.file_path == export.file_path
     [audit] = service.store.list_export_audit_logs(generation.project["id"])
-    assert audit.plan_name == "示例医疗科技海外资源对接清单"
+    assert audit.plan_name == "示例医疗科技项目执行管理总表"
     assert audit.export_type == "Excel"
 
 def test_content_versions_track_ai_edit_restore_and_final_version(tmp_path):
