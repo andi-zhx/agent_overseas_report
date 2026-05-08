@@ -18,6 +18,7 @@ from agent_overseas_report.database import (
     seed_demo_data,
 )
 from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, SQLAlchemyKnowledgeBaseRepository
+from agent_overseas_report.knowledge_base.rag import HashingEmbeddingService, LocalFAISSVectorStore
 from agent_overseas_report.services import DeepSeekLLMService, OverseasPlanGenerationService
 
 
@@ -53,7 +54,7 @@ class DemoLLMClient:
         )
 
 
-def create_default_generation_service() -> OverseasPlanGenerationService:
+def create_default_generation_service(knowledge_retriever: Any | None = None) -> OverseasPlanGenerationService:
     """Create the default SQLite-backed generation service for FastAPI.
 
     The application initializes local SQLite tables on startup and seeds a small
@@ -68,7 +69,9 @@ def create_default_generation_service() -> OverseasPlanGenerationService:
     seed_demo_data(data_repository)
     store = SQLiteGenerationRepository(session_factory)
     llm_client = DeepSeekLLMService() if os.getenv("DEEPSEEK_API_KEY") else DemoLLMClient()
-    return OverseasPlanGenerationService(data_repository=data_repository, llm_client=llm_client, store=store)
+    return OverseasPlanGenerationService(
+        data_repository=data_repository, llm_client=llm_client, store=store, knowledge_retriever=knowledge_retriever
+    )
 
 
 def create_default_knowledge_base_service() -> KnowledgeBaseService:
@@ -79,7 +82,13 @@ def create_default_knowledge_base_service() -> KnowledgeBaseService:
     session_factory = create_session_factory(engine)
     repository = SQLAlchemyKnowledgeBaseRepository(session_factory)
     storage_dir = Path(os.getenv("KNOWLEDGE_BASE_STORAGE_DIR", ".data/knowledge_base_uploads"))
-    return KnowledgeBaseService(repository=repository, storage_dir=storage_dir)
+    vector_dir = Path(os.getenv("KNOWLEDGE_BASE_VECTOR_DIR", ".data/knowledge_base_vectors"))
+    return KnowledgeBaseService(
+        repository=repository,
+        storage_dir=storage_dir,
+        embedding_service=HashingEmbeddingService(),
+        vector_store=LocalFAISSVectorStore(vector_dir),
+    )
 
 
 def get_generation_service(request: Request) -> OverseasPlanGenerationService:

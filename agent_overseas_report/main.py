@@ -26,8 +26,10 @@ def create_app(
         description="API backend for enterprise overseas-plan generation.",
         version="0.1.0",
     )
-    app.state.overseas_plan_service = generation_service or create_default_generation_service()
     app.state.knowledge_base_service = knowledge_base_service or create_default_knowledge_base_service()
+    app.state.overseas_plan_service = generation_service or create_default_generation_service(
+        knowledge_retriever=app.state.knowledge_base_service
+    )
     app.include_router(health_router, prefix="/api")
     app.include_router(enterprise_master_data_router, prefix="/api")
     app.include_router(overseas_plans_router, prefix="/api")

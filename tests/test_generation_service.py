@@ -663,3 +663,49 @@ def test_all_core_audit_actions_are_recorded_without_sensitive_body(tmp_path):
     serialized_logs = json.dumps(logs, ensure_ascii=False)
     assert "完整敏感正文" not in serialized_logs
     assert "编辑后敏感正文" not in serialized_logs
+
+
+class FakeKnowledgeRetriever:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def search(self, **kwargs):
+        self.calls.append(kwargs)
+        return [
+            {
+                "chunk_id": "chunk-1",
+                "text": "德国医疗器械渠道以本地经销商和 CE 认证资料为核心。",
+                "file_name": "germany-market.txt",
+                "page_number": None,
+                "sheet_name": None,
+                "slide_number": None,
+                "relevance_score": 0.92,
+                "metadata": {"country": "德国", "enterprise_id": "ent-1"},
+            }
+        ]
+
+
+def test_generation_prompt_includes_retrieved_context_without_replacing_main_flow():
+    llm = FakeLLM([json.dumps({"sections": REQUIRED_SECTIONS}, ensure_ascii=False)])
+    retriever = FakeKnowledgeRetriever()
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm, knowledge_retriever=retriever)
+
+    response = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+        )
+    )
+
+    assert response.project["generation_status"] == "completed"
+    assert retriever.calls[0]["enterprise_id"] == "ent-1"
+    assert retriever.calls[0]["product_id"] == "prod-1"
+    assert retriever.calls[0]["industry"] == "医疗器械"
+    assert retriever.calls[0]["country"] == "德国"
+    assert "retrieved_context" in llm.prompts[0][0]
+    assert "germany-market.txt" in llm.prompts[0][0]
+    assert "RAG 只作为上下文增强" in llm.prompts[0][0]
+    assert response.project["metadata"]["retrieved_context"][0]["chunk_id"] == "chunk-1"

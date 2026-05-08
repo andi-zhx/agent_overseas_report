@@ -169,3 +169,60 @@ def test_knowledge_file_upload_list_get_delete_flow(tmp_path) -> None:
     delete_response = client.delete(f"/api/knowledge/files/{uploaded['id']}")
     assert delete_response.status_code == 200
     assert client.get(f"/api/knowledge/files/{uploaded['id']}").status_code == 404
+
+
+def test_knowledge_embed_and_search_api(tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from agent_overseas_report.database import create_session_factory, initialize_database
+    from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, SQLAlchemyKnowledgeBaseRepository
+    from agent_overseas_report.knowledge_base.rag import HashingEmbeddingService, LocalFAISSVectorStore
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    initialize_database(engine)
+    knowledge_service = KnowledgeBaseService(
+        SQLAlchemyKnowledgeBaseRepository(create_session_factory(engine)),
+        tmp_path / "uploads",
+        embedding_service=HashingEmbeddingService(dimensions=64),
+        vector_store=LocalFAISSVectorStore(tmp_path / "vectors"),
+    )
+    client = TestClient(create_app(generation_service=make_service(), knowledge_base_service=knowledge_service))
+    source = tmp_path / "kb.txt"
+    source.write_text("德国医疗器械市场需要 CE 认证和经销商网络。", encoding="utf-8")
+
+    with source.open("rb") as file_obj:
+        upload_response = client.post(
+            "/api/knowledge/files/upload",
+            files={"file": ("kb.txt", file_obj, "text/plain")},
+            data={"enterprise_id": "ent-1", "product_id": "prod-1", "industry": "医疗器械", "country": "德国"},
+        )
+    file_id = upload_response.json()["id"]
+    embed_response = client.post(f"/api/knowledge/files/{file_id}/embed")
+    search_response = client.post(
+        "/api/knowledge/search",
+        json={
+            "query": "德国 CE 认证",
+            "enterprise_id": "ent-1",
+            "product_id": "prod-1",
+            "industry": "医疗器械",
+            "country": "德国",
+            "top_k": 5,
+        },
+    )
+    empty_response = client.post("/api/knowledge/search", json={"query": "德国", "enterprise_id": "missing", "top_k": 5})
+
+    assert upload_response.status_code == 201
+    assert embed_response.status_code == 200
+    assert embed_response.json()["embedded_chunk_count"] == 1
+    assert search_response.status_code == 200
+    [result] = search_response.json()["results"]
+    assert result["file_name"] == "kb.txt"
+    assert result["metadata"]["country"] == "德国"
+    assert empty_response.status_code == 200
+    assert empty_response.json() == {"results": []}

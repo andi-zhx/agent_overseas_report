@@ -50,11 +50,13 @@ def test_user_prompt_embeds_inputs_and_fallback_resource_instruction():
     assert "未提供具体资源名称" in user_prompt
     assert "建议对接类型" in user_prompt
     assert "required_json_structure_example" in user_prompt
+    assert "retrieved_context" in user_prompt
 
     payload = user_prompt.split("输入数据如下：\n", maxsplit=1)[1]
     parsed = json.loads(payload)
     assert parsed["enterprise_data"]["enterprise"]["name"] == "示例企业"
     assert parsed["rule_engine_output"]["maturity_assessment"]["total_score"] == 88
+    assert parsed["retrieved_context"] == []
 
 
 def test_build_prompt_bundle_supports_system_and_user_prompts():
@@ -63,9 +65,12 @@ def test_build_prompt_bundle_supports_system_and_user_prompts():
         rule_engine_output={"country_recommendation": {"recommended_country_names": ["阿联酋"]}},
         resource_library={"渠道资源": [{"name": "真实资源A"}]},
         extra_context={"version": "demo"},
+        retrieved_context=[{"chunk_id": "chunk-1", "file_name": "source.txt", "text": "德国渠道资料"}],
     )
 
     assert bundle.system_prompt == OVERSEAS_PLAN_SYSTEM_PROMPT
     assert "真实资源A" in bundle.user_prompt
     assert "阿联酋" in bundle.user_prompt
+    assert "德国渠道资料" in bundle.user_prompt
+    assert "source.txt" in bundle.user_prompt
     assert bundle.json_structure_example == OVERSEAS_PLAN_JSON_STRUCTURE_EXAMPLE
