@@ -1,5 +1,10 @@
 """Schema package for JSON schema assets and FastAPI Pydantic models."""
 
+from .overseas_plan_output_schema import (
+    OVERSEAS_PLAN_OUTPUT_SCHEMA,
+    OverseasPlanOutputSchemaError,
+    validate_overseas_plan_output_schema,
+)
 from .overseas_plan_api import (
     EnterpriseCreate,
     EnterpriseResponse,
@@ -22,6 +27,9 @@ from .overseas_plan_api import (
 )
 
 __all__ = [
+    "OVERSEAS_PLAN_OUTPUT_SCHEMA",
+    "OverseasPlanOutputSchemaError",
+    "validate_overseas_plan_output_schema",
     "EnterpriseCreate",
     "EnterpriseResponse",
     "EnterpriseUpdate",
