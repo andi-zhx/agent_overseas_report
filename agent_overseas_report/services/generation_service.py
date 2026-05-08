@@ -1011,12 +1011,15 @@ class OverseasPlanGenerationService:
             if export_project.result is None:
                 raise GenerationServiceError(f"Generation project has no exportable result: {request.project_id}")
             enterprise = self.data_repository.get_enterprise(export_project.enterprise_id)
+            export_payload = export_project.to_dict()
+            export_payload["products"] = self.data_repository.get_products(export_project.enterprise_id, list(export_project.product_ids))
             result = export_overseas_plan_word(
-                project=export_project.to_dict(),
+                project=export_payload,
                 enterprise=enterprise,
                 output_dir=request.output_dir,
                 exported_by=request.exported_by,
                 system_name=request.system_name,
+                report_version=request.report_version,
             )
             project.output_word = GeneratedFileRef(file_path=result.file_path)
             self.store.save_project(project)
@@ -1349,7 +1352,11 @@ class OverseasPlanGenerationService:
             exported_at=export_result.exported_at,
             plan_name=export_result.plan_name,
             file_path=export_result.file_path,
-            metadata={"export_kind": getattr(export_result, "export_kind", None)},
+            metadata={
+                "export_kind": getattr(export_result, "export_kind", None),
+                "report_version": getattr(export_result, "report_version", None),
+                "audit_log_path": getattr(export_result, "audit_log_path", None),
+            },
         )
 
     def _write_export_failure_audit_log(

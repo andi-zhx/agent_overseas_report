@@ -246,7 +246,7 @@ def test_word_export_creates_docx_and_writes_export_audit_log(tmp_path):
     )
 
     assert export.export_type == "Word"
-    assert export.plan_name == "示例医疗科技企业出海解决方案"
+    assert export.plan_name == "示例医疗科技企业出海服务正式报告"
     assert export.file_path.endswith(".docx")
     assert (tmp_path / generation.project["id"]).exists()
 
@@ -255,11 +255,16 @@ def test_word_export_creates_docx_and_writes_export_audit_log(tmp_path):
     with zipfile.ZipFile(export.file_path) as docx:
         document_xml = docx.read("word/document.xml").decode("utf-8")
 
-    assert "《示例医疗科技企业出海解决方案》" in document_xml
-    assert "01 企业现状诊断" in document_xml
-    assert "08 风险提示与下一步建议" in document_xml
-    assert "国家优先级矩阵表" in document_xml
-    assert "12-24个月实施路线图" in document_xml
+    assert "《示例医疗科技企业出海服务正式报告》" in document_xml
+    assert "03 执行摘要" in document_xml
+    assert "便携式检测仪" in document_xml
+    assert "05 出海成熟度诊断" in document_xml
+    assert "07 国家优先级矩阵" in document_xml
+    assert "15 12-24个月路线图" in document_xml
+    assert "17 数据来源" in document_xml
+    assert "18 人工复核清单" in document_xml
+    assert export.report_version == "client"
+    assert export.audit_log_path and export.audit_log_path.endswith("word_export_audit_log.jsonl")
 
     updated_project = service.store.get_project(generation.project["id"])
     assert updated_project.output_word.file_path == export.file_path
@@ -269,9 +274,68 @@ def test_word_export_creates_docx_and_writes_export_audit_log(tmp_path):
     assert audit.exported_by == "user-2"
     assert audit.enterprise_id == "ent-1"
     assert audit.enterprise_name == "示例医疗科技"
-    assert audit.plan_name == "示例医疗科技企业出海解决方案"
+    assert audit.plan_name == "示例医疗科技企业出海服务正式报告"
     assert audit.export_type == "Word"
     assert audit.file_path == export.file_path
+    assert audit.metadata["report_version"] == "client"
+    assert audit.metadata["audit_log_path"] == export.audit_log_path
+
+
+def test_word_export_internal_version_keeps_quality_score_missing_fields_and_review_flags(tmp_path):
+    payload = json.dumps(
+        {
+            "sections": REQUIRED_SECTIONS,
+            "global_manual_review_items": ["需人工复核德国认证周期"],
+            "citations": [
+                {"source_type": "web", "citation_id": "source-1", "notes": "目标市场资料", "manual_review_required": True}
+            ],
+        },
+        ensure_ascii=False,
+    )
+    llm = FakeLLM([payload])
+    service = OverseasPlanGenerationService(data_repository=make_repo(), llm_client=llm)
+    generation = service.generate(
+        GenerationRequest(
+            enterprise_id="ent-1",
+            product_ids=["prod-1"],
+            selected_industry="医疗器械",
+            target_countries=["德国"],
+            generated_by="user-1",
+            continue_on_validation_warning=True,
+        )
+    )
+
+    from agent_overseas_report.services import WordExportRequest
+
+    export = service.export_word(
+        WordExportRequest(
+            project_id=generation.project["id"],
+            exported_by="user-2",
+            report_version="internal",
+            output_dir=tmp_path,
+        )
+    )
+
+    import json as json_module
+    import zipfile
+
+    with zipfile.ZipFile(export.file_path) as docx:
+        document_xml = docx.read("word/document.xml").decode("utf-8")
+
+    assert export.report_version == "internal"
+    assert "内部版附录：质量评分与缺失字段" in document_xml
+    assert "质量总分" in document_xml
+    assert "缺失字段" in document_xml
+    assert "需人工复核德国认证周期" in document_xml
+    assert "source-1" in document_xml
+    audit_path = tmp_path / generation.project["id"] / "word_export_audit_log.jsonl"
+    audit_lines = audit_path.read_text(encoding="utf-8").splitlines()
+    audit_record = json_module.loads(audit_lines[-1])
+    assert audit_record["report_version"] == "internal"
+    assert audit_record["exported_by"] == "user-2"
+
+    [audit] = service.store.list_export_audit_logs(generation.project["id"])
+    assert audit.metadata["report_version"] == "internal"
 
 
 def test_ppt_export_creates_pptx_and_writes_export_audit_log(tmp_path):

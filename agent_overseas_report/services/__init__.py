@@ -53,7 +53,7 @@ from .generation_service import (
 )
 from .excel_export_service import ExcelExportKind, ExcelExportRequest, ExcelExportResult
 from .ppt_export_service import PPTExportRequest, PPTExportResult
-from .word_export_service import WordExportRequest, WordExportResult
+from .word_export_service import WordExportRequest, WordExportResult, WordReportVersion
 
 from .llm_service import (
     DeepSeekLLMService,
@@ -117,6 +117,7 @@ __all__ = [
     "PPTExportResult",
     "WordExportRequest",
     "WordExportResult",
+    "WordReportVersion",
     "DeepSeekLLMService",
     "LLMServiceError",
     "LLMConfigurationError",
