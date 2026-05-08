@@ -197,11 +197,41 @@ class PlanVersionListResponse:
 
 
 class InMemoryEnterpriseDataRepository:
-    """Small adapter for tests/demos until real enterprise/product tables exist."""
+    """In-memory enterprise/product master-data adapter for tests and demos."""
 
     def __init__(self, enterprises: dict[str, dict[str, Any]], products: dict[str, dict[str, Any]]) -> None:
         self.enterprises = enterprises
         self.products = products
+
+    def list_enterprises(self, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        return copy.deepcopy(list(self.enterprises.values())[offset : offset + limit])
+
+    def upsert_enterprise(self, enterprise: dict[str, Any]) -> dict[str, Any]:
+        self.enterprises[str(enterprise["id"])] = copy.deepcopy(enterprise)
+        return copy.deepcopy(enterprise)
+
+    def delete_enterprise(self, enterprise_id: str) -> dict[str, Any] | None:
+        removed = self.enterprises.pop(enterprise_id, None)
+        if removed is not None:
+            self.products = {product_id: product for product_id, product in self.products.items() if product.get("enterprise_id") != enterprise_id}
+        return copy.deepcopy(removed) if removed else None
+
+    def list_products(self, enterprise_id: str | None = None, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        products = list(self.products.values())
+        if enterprise_id is not None:
+            products = [product for product in products if product.get("enterprise_id") == enterprise_id]
+        return copy.deepcopy(products[offset : offset + limit])
+
+    def upsert_product(self, product: dict[str, Any]) -> dict[str, Any]:
+        enterprise_id = str(product["enterprise_id"])
+        if enterprise_id not in self.enterprises:
+            raise DataNotFoundError(f"Enterprise not found: {enterprise_id}")
+        self.products[str(product["id"])] = copy.deepcopy(product)
+        return copy.deepcopy(product)
+
+    def delete_product(self, product_id: str) -> dict[str, Any] | None:
+        removed = self.products.pop(product_id, None)
+        return copy.deepcopy(removed) if removed else None
 
     def get_enterprise(self, enterprise_id: str) -> dict[str, Any]:
         try:

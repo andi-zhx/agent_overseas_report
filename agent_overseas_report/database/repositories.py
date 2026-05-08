@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -67,13 +67,21 @@ class GenerationRepository(Protocol):
 class EnterpriseRepository(Protocol):
     """Read/write port for enterprise and product master data."""
 
+    def list_enterprises(self, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]: ...
+
     def get_enterprise(self, enterprise_id: str) -> dict[str, Any]: ...
 
     def get_products(self, enterprise_id: str, product_ids: list[str]) -> list[dict[str, Any]]: ...
 
+    def list_products(self, enterprise_id: str | None = None, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]: ...
+
     def upsert_enterprise(self, enterprise: dict[str, Any]) -> dict[str, Any]: ...
 
+    def delete_enterprise(self, enterprise_id: str) -> dict[str, Any] | None: ...
+
     def upsert_product(self, product: dict[str, Any]) -> dict[str, Any]: ...
+
+    def delete_product(self, product_id: str) -> dict[str, Any] | None: ...
 
 
 class SQLAlchemyEnterpriseRepository:
@@ -86,6 +94,11 @@ class SQLAlchemyEnterpriseRepository:
     def from_engine(cls, engine: Engine) -> SQLAlchemyEnterpriseRepository:
         return cls(create_session_factory(engine))
 
+    def list_enterprises(self, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        with self.session_factory() as session:
+            rows = session.scalars(select(EnterpriseORM).order_by(EnterpriseORM.created_at.desc()).offset(offset).limit(limit)).all()
+            return [_enterprise_row_to_payload(row) for row in rows]
+
     def upsert_enterprise(self, enterprise: dict[str, Any]) -> dict[str, Any]:
         enterprise_id = str(enterprise["id"])
         payload = copy.deepcopy(enterprise)
@@ -93,65 +106,64 @@ class SQLAlchemyEnterpriseRepository:
         with self.session_factory() as session:
             row = session.get(EnterpriseORM, enterprise_id)
             if row is None:
-                row = EnterpriseORM(
-                    id=enterprise_id,
-                    name=str(payload.get("name") or payload.get("enterprise_name") or enterprise_id),
-                    industry=payload.get("industry"),
-                    status=str(payload.get("status") or "active"),
-                    metadata_=copy.deepcopy(payload.get("metadata", {})),
-                    payload=payload,
-                    created_at=_coerce_datetime(payload.get("created_at")) or now,
-                    updated_at=_coerce_datetime(payload.get("updated_at")) or now,
-                )
+                row = EnterpriseORM(id=enterprise_id, created_at=_coerce_datetime(payload.get("created_at")) or now)
                 session.add(row)
-            else:
-                row.name = str(payload.get("name") or payload.get("enterprise_name") or row.name)
-                row.industry = payload.get("industry")
-                row.status = str(payload.get("status") or row.status)
-                row.metadata_ = copy.deepcopy(payload.get("metadata", row.metadata_ or {}))
-                row.payload = payload
-                row.updated_at = now
+            _apply_enterprise_payload(row, payload, now=now)
             session.commit()
-        return copy.deepcopy(payload)
+            session.refresh(row)
+            return _enterprise_row_to_payload(row)
+
+    def delete_enterprise(self, enterprise_id: str) -> dict[str, Any] | None:
+        with self.session_factory() as session:
+            row = session.get(EnterpriseORM, enterprise_id)
+            if row is None:
+                return None
+            payload = _enterprise_row_to_payload(row)
+            session.delete(row)
+            session.commit()
+            return payload
+
+    def list_products(self, enterprise_id: str | None = None, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        stmt = select(ProductORM).order_by(ProductORM.created_at.desc()).offset(offset).limit(limit)
+        if enterprise_id is not None:
+            stmt = stmt.where(ProductORM.enterprise_id == enterprise_id)
+        with self.session_factory() as session:
+            rows = session.scalars(stmt).all()
+            return [_product_row_to_payload(row) for row in rows]
 
     def upsert_product(self, product: dict[str, Any]) -> dict[str, Any]:
         product_id = str(product["id"])
         payload = copy.deepcopy(product)
         now = utc_now()
         with self.session_factory() as session:
+            enterprise_id = str(payload["enterprise_id"])
+            if session.get(EnterpriseORM, enterprise_id) is None:
+                raise DataNotFoundError(f"Enterprise not found: {enterprise_id}")
             row = session.get(ProductORM, product_id)
             if row is None:
-                row = ProductORM(
-                    id=product_id,
-                    enterprise_id=str(payload["enterprise_id"]),
-                    name=str(payload.get("name") or product_id),
-                    status=str(payload.get("status") or "active"),
-                    metadata_=copy.deepcopy(payload.get("metadata", {})),
-                    payload=payload,
-                    created_at=_coerce_datetime(payload.get("created_at")) or now,
-                    updated_at=_coerce_datetime(payload.get("updated_at")) or now,
-                )
+                row = ProductORM(id=product_id, created_at=_coerce_datetime(payload.get("created_at")) or now)
                 session.add(row)
-            else:
-                row.enterprise_id = str(payload["enterprise_id"])
-                row.name = str(payload.get("name") or row.name)
-                row.status = str(payload.get("status") or row.status)
-                row.metadata_ = copy.deepcopy(payload.get("metadata", row.metadata_ or {}))
-                row.payload = payload
-                row.updated_at = now
+            _apply_product_payload(row, payload, now=now)
             session.commit()
-        return copy.deepcopy(payload)
+            session.refresh(row)
+            return _product_row_to_payload(row)
+
+    def delete_product(self, product_id: str) -> dict[str, Any] | None:
+        with self.session_factory() as session:
+            row = session.get(ProductORM, product_id)
+            if row is None:
+                return None
+            payload = _product_row_to_payload(row)
+            session.delete(row)
+            session.commit()
+            return payload
 
     def get_enterprise(self, enterprise_id: str) -> dict[str, Any]:
         with self.session_factory() as session:
             row = session.get(EnterpriseORM, enterprise_id)
             if row is None:
                 raise DataNotFoundError(f"Enterprise not found: {enterprise_id}")
-            payload = copy.deepcopy(row.payload or {})
-            payload.setdefault("id", row.id)
-            payload.setdefault("name", row.name)
-            payload.setdefault("industry", row.industry)
-            return payload
+            return _enterprise_row_to_payload(row)
 
     def get_products(self, enterprise_id: str, product_ids: list[str]) -> list[dict[str, Any]]:
         selected: list[dict[str, Any]] = []
@@ -160,11 +172,7 @@ class SQLAlchemyEnterpriseRepository:
                 row = session.get(ProductORM, product_id)
                 if row is None or row.enterprise_id != enterprise_id:
                     raise DataNotFoundError(f"Product not found for enterprise {enterprise_id}: {product_id}")
-                payload = copy.deepcopy(row.payload or {})
-                payload.setdefault("id", row.id)
-                payload.setdefault("enterprise_id", row.enterprise_id)
-                payload.setdefault("name", row.name)
-                selected.append(payload)
+                selected.append(_product_row_to_payload(row))
         return selected
 
 
@@ -349,6 +357,181 @@ class SQLiteGenerationRepository:
             ]
 
 
+
+ENTERPRISE_STRUCTURED_FIELDS = {
+    "name",
+    "unified_social_credit_code",
+    "industry",
+    "enterprise_nature",
+    "established_at",
+    "region",
+    "main_business",
+    "core_products",
+    "annual_revenue_range",
+    "export_experience",
+    "current_export_countries",
+    "capacity_status",
+    "certifications",
+    "financing_needs",
+    "overseas_goals",
+    "investment_profile",
+    "market_entry_preferences",
+    "channel_requirements",
+    "expansion_plan",
+}
+
+PRODUCT_STRUCTURED_FIELDS = {
+    "enterprise_id",
+    "name",
+    "product_category",
+    "hs_code",
+    "application_scenarios",
+    "core_selling_points",
+    "technical_parameters",
+    "price_range",
+    "moq",
+    "capacity",
+    "certifications",
+    "target_customers",
+    "competitors",
+    "export_restrictions",
+    "compliance_requirements",
+    "investment_highlights",
+    "market_entry_notes",
+    "channel_fit",
+    "financing_expansion_assumptions",
+}
+
+
+def _apply_enterprise_payload(row: EnterpriseORM, payload: dict[str, Any], *, now: datetime) -> None:
+    row.name = str(payload.get("name") or payload.get("enterprise_name") or row.id)
+    row.unified_social_credit_code = payload.get("unified_social_credit_code")
+    row.industry = payload.get("industry")
+    row.enterprise_nature = payload.get("enterprise_nature")
+    row.established_at = _coerce_date(payload.get("established_at"))
+    row.region = payload.get("region")
+    row.main_business = payload.get("main_business")
+    row.core_products = _list_value(payload.get("core_products"))
+    row.annual_revenue_range = payload.get("annual_revenue_range")
+    row.export_experience = payload.get("export_experience")
+    row.current_export_countries = _list_value(payload.get("current_export_countries"))
+    row.capacity_status = _dict_value(payload.get("capacity_status"))
+    row.certifications = _list_value(payload.get("certifications"))
+    row.financing_needs = _dict_value(payload.get("financing_needs"))
+    row.overseas_goals = _list_value(payload.get("overseas_goals"))
+    row.investment_profile = _dict_value(payload.get("investment_profile"))
+    row.market_entry_preferences = _dict_value(payload.get("market_entry_preferences"))
+    row.channel_requirements = _dict_value(payload.get("channel_requirements"))
+    row.expansion_plan = _dict_value(payload.get("expansion_plan"))
+    row.status = str(payload.get("status") or row.status or "active")
+    row.metadata_ = copy.deepcopy(payload.get("metadata", row.metadata_ or {}))
+    row.payload = copy.deepcopy(payload)
+    row.updated_at = _coerce_datetime(payload.get("updated_at")) or now
+
+
+def _apply_product_payload(row: ProductORM, payload: dict[str, Any], *, now: datetime) -> None:
+    row.enterprise_id = str(payload["enterprise_id"])
+    row.name = str(payload.get("name") or row.id)
+    row.product_category = payload.get("product_category")
+    row.hs_code = payload.get("hs_code")
+    row.application_scenarios = _list_value(payload.get("application_scenarios"))
+    row.core_selling_points = _list_value(payload.get("core_selling_points"))
+    row.technical_parameters = _dict_value(payload.get("technical_parameters"))
+    row.price_range = payload.get("price_range") or payload.get("price_band")
+    row.moq = str(payload.get("moq")) if payload.get("moq") is not None else None
+    row.capacity = _dict_value(payload.get("capacity"))
+    row.certifications = _list_value(payload.get("certifications"))
+    row.target_customers = _list_value(payload.get("target_customers"))
+    row.competitors = _list_value(payload.get("competitors"))
+    row.export_restrictions = payload.get("export_restrictions")
+    row.compliance_requirements = _list_value(payload.get("compliance_requirements"))
+    row.investment_highlights = _list_value(payload.get("investment_highlights"))
+    row.market_entry_notes = _dict_value(payload.get("market_entry_notes"))
+    row.channel_fit = _dict_value(payload.get("channel_fit"))
+    row.financing_expansion_assumptions = _dict_value(payload.get("financing_expansion_assumptions"))
+    row.status = str(payload.get("status") or row.status or "active")
+    row.metadata_ = copy.deepcopy(payload.get("metadata", row.metadata_ or {}))
+    row.payload = copy.deepcopy(payload)
+    row.updated_at = _coerce_datetime(payload.get("updated_at")) or now
+
+
+def _enterprise_row_to_payload(row: EnterpriseORM) -> dict[str, Any]:
+    payload = copy.deepcopy(row.payload or {})
+    payload.update(
+        {
+            "id": row.id,
+            "name": row.name,
+            "unified_social_credit_code": row.unified_social_credit_code,
+            "industry": row.industry,
+            "enterprise_nature": row.enterprise_nature,
+            "established_at": row.established_at.isoformat() if row.established_at else payload.get("established_at"),
+            "region": row.region,
+            "main_business": row.main_business,
+            "core_products": copy.deepcopy(row.core_products or []),
+            "annual_revenue_range": row.annual_revenue_range,
+            "export_experience": row.export_experience,
+            "current_export_countries": copy.deepcopy(row.current_export_countries or []),
+            "capacity_status": copy.deepcopy(row.capacity_status or {}),
+            "certifications": copy.deepcopy(row.certifications or []),
+            "financing_needs": copy.deepcopy(row.financing_needs or {}),
+            "overseas_goals": copy.deepcopy(row.overseas_goals or []),
+            "investment_profile": copy.deepcopy(row.investment_profile or {}),
+            "market_entry_preferences": copy.deepcopy(row.market_entry_preferences or {}),
+            "channel_requirements": copy.deepcopy(row.channel_requirements or {}),
+            "expansion_plan": copy.deepcopy(row.expansion_plan or {}),
+            "metadata": copy.deepcopy(row.metadata_ or {}),
+            "status": row.status,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    )
+    return payload
+
+
+def _product_row_to_payload(row: ProductORM) -> dict[str, Any]:
+    payload = copy.deepcopy(row.payload or {})
+    payload.update(
+        {
+            "id": row.id,
+            "enterprise_id": row.enterprise_id,
+            "name": row.name,
+            "product_category": row.product_category,
+            "hs_code": row.hs_code,
+            "application_scenarios": copy.deepcopy(row.application_scenarios or []),
+            "core_selling_points": copy.deepcopy(row.core_selling_points or []),
+            "technical_parameters": copy.deepcopy(row.technical_parameters or {}),
+            "price_range": row.price_range,
+            "moq": row.moq,
+            "capacity": copy.deepcopy(row.capacity or {}),
+            "certifications": copy.deepcopy(row.certifications or []),
+            "target_customers": copy.deepcopy(row.target_customers or []),
+            "competitors": copy.deepcopy(row.competitors or []),
+            "export_restrictions": row.export_restrictions,
+            "compliance_requirements": copy.deepcopy(row.compliance_requirements or []),
+            "investment_highlights": copy.deepcopy(row.investment_highlights or []),
+            "market_entry_notes": copy.deepcopy(row.market_entry_notes or {}),
+            "channel_fit": copy.deepcopy(row.channel_fit or {}),
+            "financing_expansion_assumptions": copy.deepcopy(row.financing_expansion_assumptions or {}),
+            "metadata": copy.deepcopy(row.metadata_ or {}),
+            "status": row.status,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    )
+    return payload
+
+
+def _list_value(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return copy.deepcopy(value)
+    return [value]
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return copy.deepcopy(value) if isinstance(value, dict) else {}
+
 def seed_demo_data(enterprise_repository: SQLAlchemyEnterpriseRepository) -> None:
     """Seed the same demo records that the in-memory API previously exposed."""
 
@@ -357,6 +540,23 @@ def seed_demo_data(enterprise_repository: SQLAlchemyEnterpriseRepository) -> Non
             "id": "ent-1",
             "name": "示例医疗科技",
             "industry": "医疗器械",
+            "unified_social_credit_code": "91310000MA1K000000",
+            "enterprise_nature": "民营企业",
+            "established_at": "2018-06-01",
+            "region": "上海市",
+            "main_business": "便携式医疗检测设备研发、生产与销售",
+            "core_products": ["便携式检测仪"],
+            "annual_revenue_range": "5000万-1亿元",
+            "export_experience": "已有2年欧洲经销出口经验",
+            "current_export_countries": ["德国"],
+            "capacity_status": {"monthly_units": 10000, "utilization_rate": "70%"},
+            "certifications": ["CE", "ISO 13485"],
+            "financing_needs": {"amount": 5000000, "purpose": "扩建海外版产线"},
+            "overseas_goals": ["拓展欧盟渠道", "建立本地售后伙伴"],
+            "investment_profile": {"gross_margin": "35%", "growth_stage": "成长期"},
+            "market_entry_preferences": {"priority_regions": ["欧盟"], "entry_modes": ["经销商"]},
+            "channel_requirements": {"partner_types": ["医疗器械经销商", "本地售后服务商"]},
+            "expansion_plan": {"new_monthly_capacity": 20000, "capex": 8000000},
             "overseas_customers": ["德国经销商A"],
             "english_materials": ["英文官网", "英文说明书"],
             "team": {"international_members": 3, "languages": ["英语", "德语"], "export_years": 2},
@@ -369,11 +569,24 @@ def seed_demo_data(enterprise_repository: SQLAlchemyEnterpriseRepository) -> Non
             "id": "prod-1",
             "enterprise_id": "ent-1",
             "name": "便携式检测仪",
+            "product_category": "医疗检测设备",
             "hs_code": "902780",
+            "application_scenarios": ["基层医疗", "移动检测", "海外诊所"],
+            "core_selling_points": ["便携", "检测速度快", "支持多语言界面"],
+            "technical_parameters": {"battery_life_hours": 8, "languages": ["英语", "德语"]},
+            "price_range": "USD 200-500",
             "certifications": ["CE", "ISO 13485"],
             "capacity": {"monthly_units": 10000, "lead_time_days": 30},
             "moq": 50,
             "price_band": "USD 200-500",
+            "target_customers": ["海外诊所", "医疗器械经销商"],
+            "competitors": ["国际便携检测设备品牌"],
+            "export_restrictions": "需满足目标国医疗器械注册要求",
+            "compliance_requirements": ["CE MDR", "当地医疗器械注册"],
+            "investment_highlights": ["耗材复购", "轻量化交付"],
+            "market_entry_notes": {"recommended_mode": "经销商+售后服务伙伴"},
+            "channel_fit": {"preferred_channels": ["医疗器械经销商", "行业展会"]},
+            "financing_expansion_assumptions": {"capacity_after_financing": {"monthly_units": 20000}},
             "overseas_version": True,
             "metadata": {"seeded": True},
         }
@@ -529,6 +742,19 @@ def _export_to_row(log: OverseasPlanAuditLog) -> ReportExportORM:
 
 def _status_value(value: Any) -> str:
     return value.value if hasattr(value, "value") else str(value)
+
+
+def _coerce_date(value: Any) -> date | None:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).date()
+        except ValueError:
+            return None
+    return None
 
 
 def _coerce_datetime(value: Any) -> datetime | None:

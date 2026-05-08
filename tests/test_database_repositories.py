@@ -75,6 +75,48 @@ def test_database_tables_include_required_common_columns() -> None:
         column_names = {column["name"] for column in inspector.get_columns(table_name)}
         assert {"id", "created_at", "updated_at", "status", "metadata"}.issubset(column_names)
 
+    enterprise_columns = {column["name"] for column in inspector.get_columns("enterprises")}
+    assert {
+        "unified_social_credit_code",
+        "enterprise_nature",
+        "established_at",
+        "region",
+        "main_business",
+        "core_products",
+        "annual_revenue_range",
+        "export_experience",
+        "current_export_countries",
+        "capacity_status",
+        "certifications",
+        "financing_needs",
+        "overseas_goals",
+        "investment_profile",
+        "market_entry_preferences",
+        "channel_requirements",
+        "expansion_plan",
+    }.issubset(enterprise_columns)
+
+    product_columns = {column["name"] for column in inspector.get_columns("products")}
+    assert {
+        "product_category",
+        "hs_code",
+        "application_scenarios",
+        "core_selling_points",
+        "technical_parameters",
+        "price_range",
+        "moq",
+        "capacity",
+        "certifications",
+        "target_customers",
+        "competitors",
+        "export_restrictions",
+        "compliance_requirements",
+        "investment_highlights",
+        "market_entry_notes",
+        "channel_fit",
+        "financing_expansion_assumptions",
+    }.issubset(product_columns)
+
 
 def test_sqlite_enterprise_repository_round_trips_enterprise_and_products() -> None:
     enterprise_repo, _ = make_repositories()
