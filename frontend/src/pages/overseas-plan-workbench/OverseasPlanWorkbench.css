@@ -760,3 +760,33 @@
     margin-top: 14px;
   }
 }
+
+.audit-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.audit-item {
+  background: #fff;
+  border: 1px solid #d7e3f4;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.audit-item strong,
+.audit-item span {
+  display: block;
+}
+
+.audit-item__meta {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.audit-item__meta div {
+  background: #f6f8fb;
+  border-radius: 8px;
+  padding: 8px;
+}

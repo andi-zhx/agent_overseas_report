@@ -2,19 +2,38 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from agent_overseas_report.schemas import (
+    EditOverseasPlanRequest,
+    EditOverseasPlanResponse,
     ErrorResponse,
+    ExportOverseasPlanRequest,
+    ExportOverseasPlanResponse,
     FinalizeOverseasPlanRequest,
     FinalizeOverseasPlanResponse,
     GenerateOverseasPlanRequest,
     OverseasPlanDetailResponse,
+    OverseasPlanAuditLogListResponse,
     OverseasPlanGenerationResponse,
     OverseasPlanVersionListResponse,
+    OverseasPlanVersionResponse,
     RegenerateOverseasPlanRequest,
+    RestoreOverseasPlanVersionRequest,
+    RestoreOverseasPlanVersionResponse,
 )
-from agent_overseas_report.services import DataNotFoundError, GenerationRequest, GenerationServiceError, OverseasPlanGenerationService
+from agent_overseas_report.services import (
+    DataNotFoundError,
+    ExcelExportKind,
+    ExcelExportRequest,
+    GenerationRequest,
+    GenerationServiceError,
+    OverseasPlanGenerationService,
+    PPTExportRequest,
+    WordExportRequest,
+)
 from agent_overseas_report.dependencies import get_generation_service
 
 router = APIRouter(prefix="/overseas-plans", tags=["overseas-plans"])
@@ -181,3 +200,167 @@ def finalize_overseas_plan(
     except Exception as exc:  # noqa: BLE001 - translated at the API boundary.
         _raise_http_error(exc)
     return FinalizeOverseasPlanResponse(version=version)
+
+
+@router.get(
+    "/{project_id}/versions/{version_number}",
+    response_model=OverseasPlanVersionResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get one overseas plan version",
+)
+def get_overseas_plan_version(
+    project_id: str,
+    version_number: int,
+    service: OverseasPlanGenerationService = Depends(get_generation_service),
+) -> OverseasPlanVersionResponse:
+    """Return a single immutable historical version for preview or restore review."""
+
+    try:
+        version = service.get_version(project_id, version_number)
+    except Exception as exc:  # noqa: BLE001 - translated at the API boundary.
+        _raise_http_error(exc)
+    return OverseasPlanVersionResponse(version=version)
+
+
+@router.post(
+    "/{project_id}/edit",
+    response_model=EditOverseasPlanResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Save a manual edit as a new version",
+)
+def edit_overseas_plan(
+    project_id: str,
+    payload: EditOverseasPlanRequest,
+    request: Request,
+    service: OverseasPlanGenerationService = Depends(get_generation_service),
+) -> EditOverseasPlanResponse:
+    """Persist edited report JSON as a new content version without overwriting history."""
+
+    try:
+        project = service.update_generated_content(
+            project_id,
+            result=payload.result,
+            edited_by=payload.edited_by,
+            username=payload.username,
+            ip_address=_client_ip(request),
+            user_agent=_user_agent(request),
+        )
+    except Exception as exc:  # noqa: BLE001 - translated at the API boundary.
+        _raise_http_error(exc)
+    return EditOverseasPlanResponse(project=project.to_dict())
+
+
+@router.post(
+    "/{project_id}/versions/{version_number}/restore",
+    response_model=RestoreOverseasPlanVersionResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Restore a historical version",
+)
+def restore_overseas_plan_version(
+    project_id: str,
+    version_number: int,
+    payload: RestoreOverseasPlanVersionRequest,
+    request: Request,
+    service: OverseasPlanGenerationService = Depends(get_generation_service),
+) -> RestoreOverseasPlanVersionResponse:
+    """Restore a historical version by creating a new current version."""
+
+    try:
+        project = service.restore_version(
+            project_id,
+            version_number,
+            restored_by=payload.restored_by,
+            username=payload.username,
+            ip_address=_client_ip(request),
+            user_agent=_user_agent(request),
+        )
+    except Exception as exc:  # noqa: BLE001 - translated at the API boundary.
+        _raise_http_error(exc)
+    return RestoreOverseasPlanVersionResponse(project=project.to_dict())
+
+
+@router.get(
+    "/{project_id}/audit-logs",
+    response_model=OverseasPlanAuditLogListResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="List overseas plan audit logs",
+)
+def list_overseas_plan_audit_logs(
+    project_id: str,
+    service: OverseasPlanGenerationService = Depends(get_generation_service),
+) -> OverseasPlanAuditLogListResponse:
+    """List append-only audit records for generation, editing, finalization and exports."""
+
+    if service.store.get_project(project_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Generation project not found: {project_id}")
+    logs = [log.to_dict() for log in service.store.list_audit_logs(project_id)]
+    return OverseasPlanAuditLogListResponse(project_id=project_id, logs=logs)
+
+
+@router.post(
+    "/{project_id}/exports/{export_type}",
+    response_model=ExportOverseasPlanResponse,
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    summary="Export an overseas plan artifact",
+)
+def export_overseas_plan(
+    project_id: str,
+    export_type: str,
+    payload: ExportOverseasPlanRequest,
+    request: Request,
+    service: OverseasPlanGenerationService = Depends(get_generation_service),
+) -> ExportOverseasPlanResponse:
+    """Export Word/PPT/Excel artifacts and audit audience as client or internal."""
+
+    try:
+        if export_type == "word":
+            result = service.export_word(
+                WordExportRequest(
+                    project_id=project_id,
+                    exported_by=payload.exported_by,
+                    report_version=payload.report_version,
+                    username=payload.username,
+                    ip_address=_client_ip(request),
+                    user_agent=_user_agent(request),
+                )
+            )
+        elif export_type == "ppt":
+            result = service.export_ppt(
+                PPTExportRequest(
+                    project_id=project_id,
+                    exported_by=payload.exported_by,
+                    report_version=payload.report_version,
+                    username=payload.username,
+                    ip_address=_client_ip(request),
+                    user_agent=_user_agent(request),
+                )
+            )
+        elif export_type in {"excel", "action_plan"}:
+            result = service.export_excel(
+                ExcelExportRequest(
+                    project_id=project_id,
+                    exported_by=payload.exported_by,
+                    export_kind=ExcelExportKind.ACTION_PLAN,
+                    report_version=payload.report_version,
+                    username=payload.username,
+                    ip_address=_client_ip(request),
+                    user_agent=_user_agent(request),
+                )
+            )
+        elif export_type in {"resources", "resource_list"}:
+            result = service.export_excel(
+                ExcelExportRequest(
+                    project_id=project_id,
+                    exported_by=payload.exported_by,
+                    export_kind=ExcelExportKind.RESOURCE_LIST,
+                    report_version=payload.report_version,
+                    username=payload.username,
+                    ip_address=_client_ip(request),
+                    user_agent=_user_agent(request),
+                )
+            )
+        else:
+            raise GenerationServiceError(f"Unsupported export type: {export_type}")
+    except Exception as exc:  # noqa: BLE001 - translated at the API boundary.
+        _raise_http_error(exc)
+    return ExportOverseasPlanResponse(export=asdict(result))

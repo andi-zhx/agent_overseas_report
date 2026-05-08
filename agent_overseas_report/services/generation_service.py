@@ -166,6 +166,14 @@ class OverseasPlanAuditLog:
     result_status: str
     error_message: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    used_enterprise_data: list[dict[str, Any]] = field(default_factory=list)
+    used_product_data: list[dict[str, Any]] = field(default_factory=list)
+    used_local_knowledge_files: list[dict[str, Any]] = field(default_factory=list)
+    web_research_enabled: bool = False
+    external_sources: list[dict[str, Any]] = field(default_factory=list)
+    edited_by: str | None = None
+    finalized_by: str | None = None
+    export_audience: str | None = None
 
     # Backward-compatible fields used by existing generation/export callers.
     project_id: str | None = None
@@ -642,6 +650,7 @@ class OverseasPlanGenerationService:
                 error_message=error_reason,
                 ip_address=audit_context.ip_address if audit_context else None,
                 user_agent=audit_context.user_agent if audit_context else None,
+                metadata=self._audit_evidence_metadata(project),
             )
 
         return GenerationPreviewResponse(project=project.to_dict(), preview=project.result, audit_log=audit_log.to_dict())
@@ -817,7 +826,7 @@ class OverseasPlanGenerationService:
             user_id=edited_by,
             username=username,
             result_status=AuditResultStatus.SUCCESS,
-            metadata={"changed_top_level_fields": sorted(previous_keys ^ new_keys), "version_number": version.version_number},
+            metadata={"changed_top_level_fields": sorted(previous_keys ^ new_keys), "version_number": version.version_number, "edited_by": edited_by},
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -879,7 +888,7 @@ class OverseasPlanGenerationService:
             user_id=restored_by,
             username=username,
             result_status=AuditResultStatus.SUCCESS,
-            metadata={"restored_from_version": version_number, "version_number": restored_version.version_number},
+            metadata={"restored_from_version": version_number, "version_number": restored_version.version_number, "edited_by": restored_by},
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -909,7 +918,7 @@ class OverseasPlanGenerationService:
             user_id=finalized_by,
             username=username,
             result_status=AuditResultStatus.SUCCESS,
-            metadata={"final_version_number": version_number},
+            metadata={"final_version_number": version_number, "finalized_by": finalized_by},
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -1244,6 +1253,46 @@ class OverseasPlanGenerationService:
                 raise GenerationValidationError(f"DeepSeek JSON failed output schema validation: {exc}") from exc
         return parsed
 
+    def _audit_evidence_metadata(self, project: GenerationProject) -> dict[str, Any]:
+        """Build structured source lineage for audit records without storing full report bodies."""
+
+        retrieved_context = project.metadata.get("retrieved_context", []) if isinstance(project.metadata, dict) else []
+        local_files: dict[str, dict[str, Any]] = {}
+        external_sources: list[dict[str, Any]] = []
+        for item in retrieved_context if isinstance(retrieved_context, list) else []:
+            if not isinstance(item, dict):
+                continue
+            source_type = str(item.get("source_type") or item.get("type") or "")
+            if item.get("file_name") or item.get("chunk_id"):
+                file_id = str(item.get("file_id") or item.get("file_name") or item.get("chunk_id") or "unknown")
+                local_files.setdefault(
+                    file_id,
+                    {
+                        "file_id": item.get("file_id"),
+                        "file_name": item.get("file_name"),
+                        "chunk_id": item.get("chunk_id"),
+                        "source_type": item.get("source_type"),
+                    },
+                )
+            if item.get("url") or source_type == "web_research":
+                external_sources.append(
+                    {
+                        "title": item.get("title"),
+                        "url": item.get("url"),
+                        "source_domain": item.get("source_domain") or item.get("domain"),
+                        "retrieved_at": item.get("retrieved_at"),
+                    }
+                )
+        extra_context = project.metadata.get("extra_context", {}) if isinstance(project.metadata.get("extra_context"), dict) else {}
+        web_research = project.metadata.get("web_research", {}) if isinstance(project.metadata.get("web_research"), dict) else {}
+        return {
+            "used_enterprise_data": [{"enterprise_id": project.enterprise_id}],
+            "used_product_data": [{"product_id": product_id} for product_id in project.product_ids],
+            "used_local_knowledge_files": list(local_files.values()),
+            "web_research_enabled": bool(web_research) or bool(extra_context.get("force_web_research")),
+            "external_sources": external_sources,
+        }
+
     def _write_project_audit_log(
         self,
         project: GenerationProject,
@@ -1300,6 +1349,9 @@ class OverseasPlanGenerationService:
         plan_name: str | None = None,
         file_path: str | None = None,
         metadata: dict[str, Any] | None = None,
+        edited_by: str | None = None,
+        finalized_by: str | None = None,
+        export_audience: str | None = None,
     ) -> OverseasPlanAuditLog:
         created_at = utc_now().isoformat()
         success = result_status == AuditResultStatus.SUCCESS
@@ -1319,6 +1371,14 @@ class OverseasPlanGenerationService:
             result_status=result_status,
             error_message=error_message,
             metadata=copy.deepcopy(metadata or {}),
+            used_enterprise_data=copy.deepcopy((metadata or {}).get("used_enterprise_data", [])),
+            used_product_data=copy.deepcopy((metadata or {}).get("used_product_data", [])),
+            used_local_knowledge_files=copy.deepcopy((metadata or {}).get("used_local_knowledge_files", [])),
+            web_research_enabled=bool((metadata or {}).get("web_research_enabled", False)),
+            external_sources=copy.deepcopy((metadata or {}).get("external_sources", [])),
+            edited_by=edited_by or (metadata or {}).get("edited_by"),
+            finalized_by=finalized_by or (metadata or {}).get("finalized_by"),
+            export_audience=export_audience or (metadata or {}).get("report_version"),
             project_id=plan_id,
             version=version,
             generated_by=generated_by or user_id,
@@ -1362,10 +1422,11 @@ class OverseasPlanGenerationService:
             file_path=export_result.file_path,
             metadata={
                 "export_kind": getattr(export_result, "export_kind", None),
-                "report_version": getattr(export_result, "report_version", None),
+                "report_version": getattr(export_result, "report_version", None) or getattr(request, "report_version", None),
                 "slide_count": getattr(export_result, "slide_count", None),
                 "audit_log_path": getattr(export_result, "audit_log_path", None),
             },
+            export_audience=getattr(export_result, "report_version", None) or getattr(request, "report_version", None),
         )
 
     def _write_export_failure_audit_log(

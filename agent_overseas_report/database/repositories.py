@@ -818,6 +818,14 @@ def _audit_log_to_row(log: OverseasPlanAuditLog) -> OverseasAuditLogORM:
         enterprise_name=log.enterprise_name,
         plan_name=log.plan_name,
         file_path=log.file_path,
+        used_enterprise_data=copy.deepcopy(log.used_enterprise_data),
+        used_product_data=copy.deepcopy(log.used_product_data),
+        used_local_knowledge_files=copy.deepcopy(log.used_local_knowledge_files),
+        web_research_enabled=log.web_research_enabled,
+        external_sources=copy.deepcopy(log.external_sources),
+        edited_by=log.edited_by,
+        finalized_by=log.finalized_by,
+        export_audience=log.export_audience,
     )
 
 
@@ -838,6 +846,14 @@ def _row_to_audit_log(row: OverseasAuditLogORM) -> OverseasPlanAuditLog:
         result_status=row.result_status,
         error_message=row.error_message,
         metadata=copy.deepcopy(row.metadata_ or {}),
+        used_enterprise_data=copy.deepcopy(row.used_enterprise_data or []),
+        used_product_data=copy.deepcopy(row.used_product_data or []),
+        used_local_knowledge_files=copy.deepcopy(row.used_local_knowledge_files or []),
+        web_research_enabled=row.web_research_enabled,
+        external_sources=copy.deepcopy(row.external_sources or []),
+        edited_by=row.edited_by,
+        finalized_by=row.finalized_by,
+        export_audience=row.export_audience,
         project_id=row.project_id,
         version=row.version,
         generated_by=row.generated_by,
@@ -861,6 +877,7 @@ def _export_to_row(log: OverseasPlanAuditLog) -> ReportExportORM:
         exported_by=log.exported_by or log.user_id,
         exported_at=log.exported_at or log.created_at,
         plan_name=log.plan_name,
+        export_audience=log.export_audience,
         status=log.result_status,
         metadata_={"audit_log_id": log.id, "action_type": log.action_type, **copy.deepcopy(log.metadata or {})},
     )

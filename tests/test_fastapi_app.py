@@ -108,6 +108,36 @@ def test_generate_detail_versions_regenerate_and_finalize_flow() -> None:
     assert finalize_response.status_code == 200
     assert finalize_response.json()["version"]["is_final"] is True
 
+    edit_response = client.post(
+        f"/api/overseas-plans/{project_id}/edit",
+        json={"edited_by": "user-3", "result": {"sections": {**REQUIRED_SECTIONS, "manual": "edited"}}},
+    )
+    assert edit_response.status_code == 200
+    assert edit_response.json()["project"]["metadata"]["current_version_number"] == 2
+
+    restore_response = client.post(
+        f"/api/overseas-plans/{project_id}/versions/1/restore",
+        json={"restored_by": "user-4"},
+    )
+    assert restore_response.status_code == 200
+    assert restore_response.json()["project"]["metadata"]["current_version_number"] == 3
+
+    audit_response = client.get(f"/api/overseas-plans/{project_id}/audit-logs")
+    assert audit_response.status_code == 200
+    audit_actions = [log["action_type"] for log in audit_response.json()["logs"]]
+    assert "edit_ai_content" in audit_actions
+    assert "restore_version" in audit_actions
+    ai_log = next(log for log in audit_response.json()["logs"] if log["action_type"] == "ai_generate_plan")
+    assert ai_log["used_enterprise_data"] == [{"enterprise_id": "ent-1"}]
+    assert ai_log["used_product_data"] == [{"product_id": "prod-1"}]
+
+    export_response = client.post(
+        f"/api/overseas-plans/{project_id}/exports/word",
+        json={"exported_by": "user-5", "report_version": "internal"},
+    )
+    assert export_response.status_code == 200
+    assert export_response.json()["export"]["report_version"] == "internal"
+
     regenerate_response = client.post(
         f"/api/overseas-plans/{project_id}/regenerate",
         json={"generated_by": "user-2", "extra_context": {"reason": "更新策略"}},

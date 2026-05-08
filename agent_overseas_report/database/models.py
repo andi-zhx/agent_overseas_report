@@ -210,6 +210,14 @@ class OverseasAuditLogORM(TimestampStatusMetadataMixin, Base):
     enterprise_name: Mapped[str | None] = mapped_column(String(255))
     plan_name: Mapped[str | None] = mapped_column(String(255))
     file_path: Mapped[str | None] = mapped_column(Text)
+    used_enterprise_data: Mapped[list[dict[str, Any]]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    used_product_data: Mapped[list[dict[str, Any]]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    used_local_knowledge_files: Mapped[list[dict[str, Any]]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    web_research_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    external_sources: Mapped[list[dict[str, Any]]] = mapped_column(SQLiteJSON, nullable=False, default=list)
+    edited_by: Mapped[str | None] = mapped_column(String(128))
+    finalized_by: Mapped[str | None] = mapped_column(String(128))
+    export_audience: Mapped[str | None] = mapped_column(String(32))
 
 
 class ReportQualityScoreORM(TimestampStatusMetadataMixin, Base):
@@ -237,3 +245,4 @@ class ReportExportORM(TimestampStatusMetadataMixin, Base):
     exported_by: Mapped[str | None] = mapped_column(String(128))
     exported_at: Mapped[str | None] = mapped_column(String(64))
     plan_name: Mapped[str | None] = mapped_column(String(255))
+    export_audience: Mapped[str | None] = mapped_column(String(32))
