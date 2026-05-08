@@ -26,6 +26,8 @@ from agent_overseas_report.models import (
     PlanContentVersion,
 )
 from agent_overseas_report.models.overseas_generation import utc_now
+from agent_overseas_report.crew.config import is_crewai_enabled
+from agent_overseas_report.crew.crew_runner import CrewOverseasPlanRunner
 from agent_overseas_report.prompts import INVESTMENT_GRADE_REPORT_MODULES, build_overseas_plan_prompts
 from agent_overseas_report.schemas.overseas_plan_output_schema import (
     OverseasPlanOutputSchemaError,
@@ -547,7 +549,22 @@ class OverseasPlanGenerationService:
                 retrieved_context=retrieved_context,
                 context_bundle=context_bundle_payload,
             )
-            raw_output = self.llm_client.generate_text(prompt_bundle.user_prompt, system_prompt=prompt_bundle.system_prompt)
+            if is_crewai_enabled():
+                crew_result = CrewOverseasPlanRunner(llm_client=self.llm_client).run(
+                    prompt_bundle=prompt_bundle,
+                    enterprise_data={**enterprise_data, "templates": template_payload, "generation_readiness": readiness_report.to_dict()},
+                    rule_engine_output=rule_output,
+                    local_context=local_context,
+                    web_research_context=web_research_context,
+                    context_bundle=context_bundle_payload,
+                )
+                raw_output = crew_result.report_json_text
+                project.metadata["crewai"] = crew_result.metadata
+                project.metadata["crewai_research_summary"] = crew_result.research_summary
+                project.metadata["crewai_strategy_output"] = crew_result.strategy_output
+            else:
+                raw_output = self.llm_client.generate_text(prompt_bundle.user_prompt, system_prompt=prompt_bundle.system_prompt)
+                project.metadata["crewai"] = {"enabled": False}
             parsed_output = self._parse_validate_or_repair(raw_output, prompt_bundle, project, enterprise_data, rule_output)
             parsed_output = _apply_plan_safety_guards(parsed_output)
 
@@ -570,6 +587,7 @@ class OverseasPlanGenerationService:
                     "prompt_model": getattr(getattr(self.llm_client, "config", None), "model", None),
                     "json_repaired": project.metadata.get("json_repaired", False),
                     "json_fallback_used": project.metadata.get("json_fallback_used", False),
+                    "orchestration": "crewai" if project.metadata.get("crewai", {}).get("enabled") else "legacy_llm",
                 }
             )
             content_version = self._append_content_version(
