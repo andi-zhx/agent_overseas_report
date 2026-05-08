@@ -562,6 +562,9 @@ class OverseasPlanGenerationService:
                 project.metadata["crewai"] = crew_result.metadata
                 project.metadata["crewai_research_summary"] = crew_result.research_summary
                 project.metadata["crewai_strategy_output"] = crew_result.strategy_output
+                project.metadata["crewai_step_outputs"] = crew_result.step_outputs
+                project.metadata["crewai_quality_review"] = crew_result.quality_review
+                project.metadata["crewai_quality_status"] = crew_result.quality_status
             else:
                 raw_output = self.llm_client.generate_text(prompt_bundle.user_prompt, system_prompt=prompt_bundle.system_prompt)
                 project.metadata["crewai"] = {"enabled": False}

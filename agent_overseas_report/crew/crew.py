@@ -1,4 +1,4 @@
-"""Crew construction helpers for the minimal three-agent workflow."""
+"""Crew construction helpers for the enterprise multi-agent workflow."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class MinimalCrew:
 
 
 def create_overseas_plan_crew(settings: CrewAISettings | None = None, llm: Any | None = None) -> Any:
-    """Create the minimal CrewAI crew descriptor.
+    """Create the enterprise CrewAI crew descriptor.
 
     If CrewAI is installed and all agents are real CrewAI agents, this returns a
     ``crewai.Crew`` with sequential process. Otherwise it returns ``MinimalCrew``.

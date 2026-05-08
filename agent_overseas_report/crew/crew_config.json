@@ -1,21 +1,70 @@
 {
   "process": "sequential",
+  "feature_flag": "ENABLE_CREWAI=true",
+  "data_access_policy": "Agents must not access databases directly; all factual inputs are provided through ContextBundle and upstream step outputs.",
+  "global_constraints": [
+    "不得编造数据；缺事实、数值、年份、来源或假设时必须标记为信息缺口/需人工复核。",
+    "所有事实、数据、政策、市场判断和资源建议必须附 citations。",
+    "每一步输出都必须可保存和审计。"
+  ],
+  "tasks": [
+    "company_diagnosis",
+    "market_research",
+    "channel_strategy",
+    "resource_matching",
+    "financial_planning",
+    "risk_compliance",
+    "report_writing",
+    "quality_review"
+  ],
   "agents": {
-    "research": {
-      "role": "ResearchAgent",
-      "goal": "整理本地 RAG 和 WebResearch 结果，形成研究摘要",
-      "single_responsibility": "research_summary_only"
+    "company_diagnosis": {
+      "role": "CompanyDiagnosisAgent",
+      "goal": "诊断企业、产品、团队、产能、认证和出海准备度",
+      "input": "ContextBundle.enterprise_data, rule_engine_outputs, missing_field_analysis",
+      "output": "企业与产品诊断结果"
     },
-    "strategy": {
-      "role": "StrategyAgent",
-      "goal": "基于研究摘要和规则引擎输出生成出海策略",
-      "single_responsibility": "strategy_only"
+    "market_research": {
+      "role": "MarketResearchAgent",
+      "goal": "研究目标市场与国家机会、壁垒和证据边界",
+      "input": "ContextBundle.local_chunks, web_research_sources, templates, company_diagnosis output",
+      "output": "市场与国家研究结果"
     },
-    "report": {
-      "role": "ReportAgent",
-      "goal": "将策略整合为结构化报告 JSON",
-      "single_responsibility": "schema_compatible_report_json_only"
+    "channel_strategy": {
+      "role": "ChannelStrategyAgent",
+      "goal": "设计渠道进入策略和营销动作",
+      "input": "ContextBundle plus company_diagnosis and market_research outputs",
+      "output": "渠道策略设计"
+    },
+    "resource_matching": {
+      "role": "ResourceMatchingAgent",
+      "goal": "匹配展会、服务商、认证、物流、平台招商、园区和金融资源",
+      "input": "ContextBundle resource templates plus upstream outputs",
+      "output": "资源匹配清单"
+    },
+    "financial_planning": {
+      "role": "FinancialPlanningAgent",
+      "goal": "分析投融资、预算、现金流、扩产和投入产出假设",
+      "input": "ContextBundle finance/capacity data plus channel/resource outputs",
+      "output": "投融资与扩产分析"
+    },
+    "risk_compliance": {
+      "role": "RiskComplianceAgent",
+      "goal": "检查合规、认证、贸易、税务、数据、合同和运营风险",
+      "input": "ContextBundle evidence plus all analytical outputs",
+      "output": "合规与风险检查"
+    },
+    "report_writer": {
+      "role": "ReportWriterAgent",
+      "goal": "整合完整企业出海报告 JSON",
+      "input": "Original prompt, ContextBundle, JSON schema example and all upstream outputs",
+      "output": "Schema-compatible final report JSON"
+    },
+    "quality_review": {
+      "role": "QualityReviewAgent",
+      "goal": "复核来源、具体性和预算假设，决定 approved 或 revision_required",
+      "input": "ContextBundle, all upstream outputs and final report JSON",
+      "output": "Quality review JSON with status, issues and required_revisions"
     }
-  },
-  "feature_flag": "ENABLE_CREWAI=true"
+  }
 }
