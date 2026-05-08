@@ -116,3 +116,56 @@ def test_generate_detail_versions_regenerate_and_finalize_flow() -> None:
     regenerated = regenerate_response.json()
     assert regenerated["project"]["id"] != project_id
     assert regenerated["project"]["metadata"]["extra_context"]["regenerated_from_project_id"] == project_id
+
+
+def test_knowledge_file_upload_list_get_delete_flow(tmp_path) -> None:
+    pytest.importorskip("sqlalchemy")
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from agent_overseas_report.database import create_session_factory, initialize_database
+    from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, SQLAlchemyKnowledgeBaseRepository
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    initialize_database(engine)
+    knowledge_service = KnowledgeBaseService(
+        SQLAlchemyKnowledgeBaseRepository(create_session_factory(engine)), tmp_path / "uploads"
+    )
+    client = TestClient(create_app(generation_service=make_service(), knowledge_base_service=knowledge_service))
+
+    response = client.post(
+        "/api/knowledge/files/upload",
+        data={
+            "enterprise_id": "ent-1",
+            "product_id": "prod-1",
+            "industry": "医疗器械",
+            "country": "德国",
+            "source_type": "product_material",
+            "metadata_json": '{"language":"zh-CN"}',
+        },
+        files={"file": ("product.md", "# 产品资料\n便携式检测仪适合德国渠道。".encode("utf-8"), "text/markdown")},
+    )
+    assert response.status_code == 201
+    uploaded = response.json()
+    assert uploaded["file_type"] == "markdown"
+    assert uploaded["parsed_status"] == "parsed"
+    assert uploaded["metadata"] == {"language": "zh-CN"}
+    assert uploaded["chunks"][0]["text"].startswith("# 产品资料")
+
+    list_response = client.get("/api/knowledge/files", params={"enterprise_id": "ent-1"})
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["id"] == uploaded["id"]
+    assert list_response.json()[0]["chunks"] == []
+
+    detail_response = client.get(f"/api/knowledge/files/{uploaded['id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["chunks"][0]["token_count"] > 0
+
+    delete_response = client.delete(f"/api/knowledge/files/{uploaded['id']}")
+    assert delete_response.status_code == 200
+    assert client.get(f"/api/knowledge/files/{uploaded['id']}").status_code == 404

@@ -259,3 +259,43 @@ def test_generation_service_can_use_sqlite_repository() -> None:
         "create_plan",
         "ai_generate_plan",
     ]
+
+
+def test_knowledge_base_tables_include_file_and_chunk_columns() -> None:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    initialize_database(engine)
+
+    inspector = inspect(engine)
+    assert {"knowledge_base_files", "knowledge_base_chunks"}.issubset(set(inspector.get_table_names()))
+
+    file_columns = {column["name"] for column in inspector.get_columns("knowledge_base_files")}
+    assert {
+        "file_name",
+        "file_type",
+        "file_path",
+        "enterprise_id",
+        "product_id",
+        "industry",
+        "country",
+        "source_type",
+        "uploaded_at",
+        "parsed_status",
+        "parse_error",
+    }.issubset(file_columns)
+
+    chunk_columns = {column["name"] for column in inspector.get_columns("knowledge_base_chunks")}
+    assert {
+        "file_id",
+        "chunk_index",
+        "text",
+        "page_number",
+        "sheet_name",
+        "slide_number",
+        "token_count",
+        "metadata",
+    }.issubset(chunk_columns)
