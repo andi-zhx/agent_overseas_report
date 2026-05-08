@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, func
@@ -82,6 +82,46 @@ class ProductORM(TimestampStatusMetadataMixin, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(SQLiteJSON, nullable=False, default=dict)
 
     enterprise: Mapped[EnterpriseORM] = relationship(back_populates="products")
+
+
+class KnowledgeBaseFileORM(TimestampStatusMetadataMixin, Base):
+    """Uploaded local knowledge file metadata and parser status."""
+
+    __tablename__ = "knowledge_base_files"
+
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    file_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    enterprise_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    product_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    industry: Mapped[str | None] = mapped_column(String(128), index=True)
+    country: Mapped[str | None] = mapped_column(String(128), index=True)
+    source_type: Mapped[str | None] = mapped_column(String(64), index=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    parsed_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", server_default="pending", index=True
+    )
+    parse_error: Mapped[str | None] = mapped_column(Text)
+
+    chunks: Mapped[list[KnowledgeBaseChunkORM]] = relationship(
+        back_populates="file", cascade="all, delete-orphan", order_by="KnowledgeBaseChunkORM.chunk_index"
+    )
+
+
+class KnowledgeBaseChunkORM(TimestampStatusMetadataMixin, Base):
+    """Parsed text chunk prepared for later RAG retrieval/vectorization."""
+
+    __tablename__ = "knowledge_base_chunks"
+
+    file_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base_files.id"), nullable=False, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    sheet_name: Mapped[str | None] = mapped_column(String(255))
+    slide_number: Mapped[int | None] = mapped_column(Integer)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    file: Mapped[KnowledgeBaseFileORM] = relationship(back_populates="chunks")
 
 
 class OverseasGenerationProjectORM(TimestampStatusMetadataMixin, Base):
