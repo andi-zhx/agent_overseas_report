@@ -172,6 +172,7 @@ def build_overseas_plan_prompts(
     resource_library: dict[str, Any] | list[Any] | None = None,
     extra_context: dict[str, Any] | None = None,
     retrieved_context: list[dict[str, Any]] | None = None,
+    context_bundle: dict[str, Any] | None = None,
 ) -> OverseasPlanPromptBundle:
     """Build the complete DeepSeek prompt bundle for overseas-plan generation.
 
@@ -191,6 +192,7 @@ def build_overseas_plan_prompts(
             resource_library=resource_library,
             extra_context=extra_context,
             retrieved_context=retrieved_context,
+            context_bundle=context_bundle,
         ),
         json_structure_example=OVERSEAS_PLAN_JSON_STRUCTURE_EXAMPLE,
     )
@@ -203,6 +205,7 @@ def build_overseas_plan_user_prompt(
     resource_library: dict[str, Any] | list[Any] | None = None,
     extra_context: dict[str, Any] | None = None,
     retrieved_context: list[dict[str, Any]] | None = None,
+    context_bundle: dict[str, Any] | None = None,
 ) -> str:
     """Assemble the user prompt from enterprise facts, rule output, resources, and JSON shape."""
 
@@ -218,6 +221,7 @@ def build_overseas_plan_user_prompt(
         "resource_library": resource_payload,
         "extra_context": extra_context or {},
         "retrieved_context": retrieved_context or [],
+        "context_bundle": context_bundle or {},
         "generation_readiness": (extra_context or {}).get("generation_readiness") or enterprise_data.get("generation_readiness") or {},
         "required_json_structure_example": OVERSEAS_PLAN_JSON_STRUCTURE_EXAMPLE,
     }
@@ -225,11 +229,11 @@ def build_overseas_plan_user_prompt(
     return (
         "请基于以下输入，为企业生成完整的出海方案 JSON。\n"
         "组装逻辑：以 enterprise_data 作为企业事实底座；以 rule_engine_output 作为国家、成熟度、渠道、资源匹配的优先参考；"
-        "resource_library 仅用于引用真实存在的资源名称；retrieved_context 是本地知识库与 WebResearchService 检索到的补充上下文且必须保留来源；required_json_structure_example 是必须遵循的输出结构。\n"
+        "resource_library 仅用于引用真实存在的资源名称；context_bundle 是生成前统一构建的上下文包，包含企业/产品结构化信息、本地知识库、网络研究、规则引擎、缺失字段、citations 和数据质量警告；retrieved_context 仅为兼容字段；required_json_structure_example 是必须遵循的输出结构。\n"
         "重要约束：不得编造未提供的具体资源名称或联系方式；没有具体资源名称时写“建议对接类型”；"
-        "缺失字段已通过 generation_readiness 传入，必须原样视为数据缺口，不能编造；若 manual_review_required=true，必须在方案中标记“需人工补充/复核”；"
+        "关键数据必须优先依据 context_bundle 中带 citation_ids 或 citations 的来源，输出重要判断时要引用对应 citation_id；缺失字段必须写入 missing_fields / data_quality_notes，不能编造；若 manual_review_required=true，必须在方案中标记“需人工补充/复核”；"
         "关税、政策、市场规模、展会档期、基金条件等动态信息必须标注“需人工复核”；"
-        "RAG 只作为上下文增强，WebResearchService 也只作为有来源的外部资料补充，不得直接替代 enterprise_data、rule_engine_output 或既有报告生成逻辑；引用 retrieved_context 时需结合其来源元数据；没有来源的数据必须标注“需人工复核”。"
+        "RAG 只作为上下文增强，WebResearchService 也只作为有来源的外部资料补充，不得直接替代 enterprise_data、rule_engine_output 或既有报告生成逻辑；引用 retrieved_context 或 context_bundle 中的检索资料时需结合其来源元数据；没有 citations 的数据必须标注“需人工复核”。"
         "每条建议都要结合企业产品、行业、国家或资源类型，避免空泛。\n\n"
         f"输入数据如下：\n{_to_pretty_json(prompt_payload)}"
     )

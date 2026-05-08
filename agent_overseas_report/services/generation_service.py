@@ -28,6 +28,7 @@ from agent_overseas_report.models import (
 from agent_overseas_report.models.overseas_generation import utc_now
 from agent_overseas_report.prompts import build_overseas_plan_prompts
 from agent_overseas_report.services.llm_service import LLMServiceError
+from agent_overseas_report.services.report_context_builder import ReportContextBuilder
 from agent_overseas_report.services.generation_readiness import assess_generation_readiness
 from agent_overseas_report.services.rule_engine import OverseasRuleEngine
 from agent_overseas_report.services.web_research_service import WebResearchRequest, WebResearchService, WebResearchTask
@@ -384,6 +385,7 @@ class OverseasPlanGenerationService:
     rule_engine: OverseasRuleEngine | None = None
     knowledge_retriever: KnowledgeRetriever | None = None
     web_research_service: WebResearchService | None = None
+    context_builder: ReportContextBuilder = field(default_factory=ReportContextBuilder)
 
     def __post_init__(self) -> None:
         if self.rule_engine is None:
@@ -510,17 +512,36 @@ class OverseasPlanGenerationService:
                 raise GenerationValidationError(readiness_report.message)
             template_payload = self._load_templates(project, enterprise_data)
             rule_output = self.rule_engine.evaluate(enterprise_data) if self.rule_engine else {}
-            retrieved_context = self._retrieve_context(project, enterprise_data)
-            web_research_context = self._retrieve_web_research_context(project, enterprise_data, retrieved_context)
-            if web_research_context:
-                retrieved_context = [*retrieved_context, *web_research_context]
+            local_context = self._retrieve_context(project, enterprise_data)
+            web_research_context = self._retrieve_web_research_context(project, enterprise_data, local_context)
+            retrieved_context = [*local_context, *web_research_context]
+            context_bundle = self.context_builder.build(
+                enterprise_data={**enterprise_data, "templates": template_payload},
+                user_parameters={
+                    "project_id": project.id,
+                    "version": project.version,
+                    "enterprise_id": project.enterprise_id,
+                    "product_ids": list(project.product_ids),
+                    "selected_industry": project.selected_industry,
+                    "target_countries": list(project.target_countries),
+                    "generated_by": project.generated_by,
+                    **project.metadata.get("extra_context", {}),
+                },
+                local_chunks=local_context,
+                web_research_sources=web_research_context,
+                rule_engine_outputs=rule_output,
+                missing_field_analysis=readiness_report.to_dict(),
+            )
+            context_bundle_payload = context_bundle.to_dict()
             project.metadata["retrieved_context"] = retrieved_context
+            project.metadata["context_bundle"] = context_bundle_payload
             prompt_bundle = build_overseas_plan_prompts(
                 enterprise_data={**enterprise_data, "templates": template_payload, "generation_readiness": readiness_report.to_dict()},
                 rule_engine_output=rule_output,
                 resource_library=template_payload["resource_templates"],
                 extra_context={"project_id": project.id, "version": project.version, "generation_readiness": readiness_report.to_dict(), **project.metadata.get("extra_context", {})},
                 retrieved_context=retrieved_context,
+                context_bundle=context_bundle_payload,
             )
             raw_output = self.llm_client.generate_text(prompt_bundle.user_prompt, system_prompt=prompt_bundle.system_prompt)
             parsed_output = self._parse_validate_or_repair(raw_output, prompt_bundle, project, enterprise_data, rule_output)
