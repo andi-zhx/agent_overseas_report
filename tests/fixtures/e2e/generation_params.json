@@ -1,0 +1,14 @@
+{
+  "enterprise_id": "ent-e2e-001",
+  "product_ids": ["prod-e2e-001"],
+  "selected_industry": "医疗器械",
+  "target_countries": ["德国", "荷兰"],
+  "generated_by": "acceptance-user",
+  "username": "验收用户",
+  "continue_on_validation_warning": true,
+  "extra_context": {
+    "force_web_research": true,
+    "report_audience": "客户交付版",
+    "acceptance_scenario": "企业出海报告生成端到端验收"
+  }
+}

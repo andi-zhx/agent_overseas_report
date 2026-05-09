@@ -1,0 +1,42 @@
+{
+  "id": "prod-e2e-001",
+  "enterprise_id": "ent-e2e-001",
+  "name": "Aquila 便携式检测仪",
+  "product_category": "体外诊断设备",
+  "hs_code": "902780",
+  "application_scenarios": ["基层诊所快速检测", "移动筛查车", "海外经销商样机演示"],
+  "core_selling_points": ["15 分钟出结果", "支持云端质控", "耗材毛利稳定", "可提供英文/德文界面"],
+  "technical_parameters": {
+    "throughput_per_hour": 24,
+    "connectivity": ["Wi-Fi", "4G", "USB"],
+    "weight_kg": 3.2
+  },
+  "price_range": "USD 320-520",
+  "moq": "50 台",
+  "capacity": {
+    "monthly_units": 12000,
+    "lead_time_days": 28
+  },
+  "certifications": ["CE", "ISO 13485", "RoHS"],
+  "target_customers": ["欧洲医疗器械经销商", "基层诊所集团", "移动检测服务商"],
+  "competitors": ["Abbott i-STAT", "Roche cobas h 232"],
+  "export_restrictions": "不涉及两用物项；需根据目标国确认 IVD 注册路径。",
+  "compliance_requirements": ["MDR/IVDR 注册路径复核", "欧盟授权代表", "售后不良事件报告流程"],
+  "investment_highlights": ["设备+耗材复购模型", "已具备 CE 基础", "渠道签约后产能可扩张"],
+  "market_entry_notes": {
+    "recommended_first_country": "德国",
+    "reason": "医疗器械渠道成熟且展会资源集中"
+  },
+  "channel_fit": {
+    "ideal_partner": "覆盖基层诊所和区域实验室的经销商",
+    "enablement_materials": ["德文彩页", "CE 技术文档摘要", "售后 SLA"]
+  },
+  "financing_expansion_assumptions": {
+    "working_capital_cny": 6000000,
+    "demo_units": 200,
+    "payback_months": 18
+  },
+  "metadata": {
+    "sample_use": "e2e_acceptance"
+  }
+}
