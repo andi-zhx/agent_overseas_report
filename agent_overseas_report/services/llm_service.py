@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
+
+from agent_overseas_report.config import AppSettings
 
 logger = logging.getLogger(__name__)
 
@@ -57,24 +58,15 @@ class DeepSeekLLMConfig:
     @classmethod
     def from_env(cls) -> "DeepSeekLLMConfig":
         """Build configuration from environment variables."""
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
+        settings = AppSettings.from_env()
+        if not settings.deepseek.api_key:
             raise LLMConfigurationError("Missing required environment variable: DEEPSEEK_API_KEY")
 
-        model = os.getenv("DEEPSEEK_MODEL", DEFAULT_DEEPSEEK_MODEL)
-        base_url = os.getenv("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL)
-        timeout_raw = os.getenv("DEEPSEEK_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS))
-
-        try:
-            timeout_seconds = float(timeout_raw)
-        except ValueError as exc:
-            raise LLMConfigurationError("DEEPSEEK_TIMEOUT_SECONDS must be a number") from exc
-
         return cls(
-            api_key=api_key,
-            model=model,
-            base_url=base_url,
-            timeout_seconds=timeout_seconds,
+            api_key=settings.deepseek.api_key,
+            model=settings.deepseek.model,
+            base_url=settings.deepseek.base_url,
+            timeout_seconds=settings.deepseek.timeout_seconds,
         )
 
 

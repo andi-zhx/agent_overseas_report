@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import Request
+
+from agent_overseas_report.config import AppSettings
 
 from agent_overseas_report.database import (
     SQLAlchemyEnterpriseRepository,
@@ -20,6 +21,7 @@ from agent_overseas_report.database import (
 from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, SQLAlchemyKnowledgeBaseRepository
 from agent_overseas_report.knowledge_base.rag import HashingEmbeddingService, LocalFAISSVectorStore
 from agent_overseas_report.services import DeepSeekLLMService, OverseasPlanGenerationService
+from agent_overseas_report.services.web_research_service import DefaultWebResearchService, WebSearchResult
 
 
 REQUIRED_SECTIONS: dict[str, Any] = {
@@ -54,6 +56,13 @@ class DemoLLMClient:
         )
 
 
+class NoopWebSearchClient:
+    """Local-safe web search adapter used until a real search provider is configured."""
+
+    def search(self, query: str, *, top_k: int = 5) -> list[WebSearchResult]:
+        return []
+
+
 def create_default_generation_service(knowledge_retriever: Any | None = None) -> OverseasPlanGenerationService:
     """Create the default SQLite-backed generation service for FastAPI.
 
@@ -62,31 +71,42 @@ def create_default_generation_service(knowledge_retriever: Any | None = None) ->
     services. Unit tests can still inject ``InMemoryGenerationStore`` explicitly.
     """
 
-    engine = create_database_engine()
+    settings = AppSettings.from_env()
+    settings.validate()
+    engine = create_database_engine(settings.database_url)
     initialize_database(engine)
     session_factory = create_session_factory(engine)
     data_repository = SQLAlchemyEnterpriseRepository(session_factory)
     seed_demo_data(data_repository)
     store = SQLiteGenerationRepository(session_factory)
-    llm_client = DeepSeekLLMService() if os.getenv("DEEPSEEK_API_KEY") else DemoLLMClient()
+    llm_client = DeepSeekLLMService() if settings.has_deepseek_api_key else DemoLLMClient()
+    web_research_service = (
+        DefaultWebResearchService(search_client=NoopWebSearchClient()) if settings.enable_web_research else None
+    )
     return OverseasPlanGenerationService(
-        data_repository=data_repository, llm_client=llm_client, store=store, knowledge_retriever=knowledge_retriever
+        data_repository=data_repository,
+        llm_client=llm_client,
+        store=store,
+        knowledge_retriever=knowledge_retriever,
+        web_research_service=web_research_service,
     )
 
 
 def create_default_knowledge_base_service() -> KnowledgeBaseService:
     """Create the default SQLite-backed local knowledge-base ingestion service."""
 
-    engine = create_database_engine()
+    settings = AppSettings.from_env()
+    settings.validate()
+    engine = create_database_engine(settings.database_url)
     initialize_database(engine)
     session_factory = create_session_factory(engine)
     repository = SQLAlchemyKnowledgeBaseRepository(session_factory)
-    storage_dir = Path(os.getenv("KNOWLEDGE_BASE_STORAGE_DIR", ".data/knowledge_base_uploads"))
-    vector_dir = Path(os.getenv("KNOWLEDGE_BASE_VECTOR_DIR", ".data/knowledge_base_vectors"))
+    storage_dir = Path(settings.knowledge_base_storage_dir)
+    vector_dir = Path(settings.embedding.vector_dir)
     return KnowledgeBaseService(
         repository=repository,
         storage_dir=storage_dir,
-        embedding_service=HashingEmbeddingService(),
+        embedding_service=HashingEmbeddingService(dimensions=settings.embedding.dimensions),
         vector_store=LocalFAISSVectorStore(vector_dir),
     )
 

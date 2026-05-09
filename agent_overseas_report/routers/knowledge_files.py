@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
+from agent_overseas_report.config import AppSettings
 from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, KnowledgeFileNotFoundError, KnowledgeFileUpload
 from agent_overseas_report.schemas.knowledge_base_api import (
     KnowledgeBaseFileResponse,
@@ -27,6 +28,12 @@ def get_knowledge_base_service(request: Request) -> KnowledgeBaseService:
     return request.app.state.knowledge_base_service
 
 
+def get_settings(request: Request) -> AppSettings:
+    """Return app-scoped settings for upload validation."""
+
+    return getattr(request.app.state, "settings", AppSettings.from_env())
+
+
 @router.post(
     "/knowledge/files/upload",
     response_model=KnowledgeBaseFileResponse,
@@ -43,15 +50,18 @@ def upload_knowledge_file(
     source_type: Annotated[str | None, Form()] = None,
     metadata_json: Annotated[str | None, Form(description="可选 JSON 字符串形式的扩展元数据。")] = None,
     service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+    settings: AppSettings = Depends(get_settings),
 ) -> dict[str, Any]:
     """Upload a local document, identify its type, parse text, and persist chunks."""
 
     metadata = _parse_metadata_json(metadata_json)
     suffix = Path(file.filename or "upload.bin").suffix
+    _validate_upload_type(file, settings)
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
         temp_path = Path(temp_file.name)
-        temp_file.write(file.file.read())
     try:
+        with temp_path.open("wb") as temp_file:
+            _copy_upload_with_size_limit(file, temp_file, settings.upload.max_bytes)
         return service.upload_and_parse(
             KnowledgeFileUpload(
                 file_name=file.filename or "upload.bin",
@@ -178,3 +188,40 @@ def _parse_metadata_json(metadata_json: str | None) -> dict[str, Any]:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="metadata_json must be a JSON object"
         )
     return data
+
+
+def _validate_upload_type(file: UploadFile, settings: AppSettings) -> None:
+    """Reject files whose extension or MIME type is outside the configured whitelist."""
+
+    file_name = file.filename or "upload.bin"
+    suffix = Path(file_name).suffix.lower()
+    allowed_extensions = {item.lower() for item in settings.upload.allowed_extensions}
+    allowed_mime_types = {item.lower() for item in settings.upload.allowed_mime_types}
+    if suffix not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file extension: {suffix or '<none>'}",
+        )
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type and content_type not in allowed_mime_types:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported content type: {content_type}",
+        )
+
+
+def _copy_upload_with_size_limit(file: UploadFile, destination: Any, max_bytes: int) -> None:
+    """Copy the uploaded stream while enforcing a maximum byte count."""
+
+    total = 0
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Uploaded file exceeds configured limit of {max_bytes} bytes",
+            )
+        destination.write(chunk)
