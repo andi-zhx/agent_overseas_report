@@ -1,0 +1,48 @@
+{
+  "id": "ent-e2e-001",
+  "name": "杭州智检医疗科技有限公司",
+  "unified_social_credit_code": "91330100MA2E2E2E2E",
+  "industry": "医疗器械",
+  "enterprise_nature": "民营高新技术企业",
+  "established_at": "2018-05-18",
+  "region": "浙江杭州",
+  "main_business": "便携式体外检测设备、配套试剂耗材和远程质控平台的研发、生产与销售。",
+  "core_products": ["Aquila 便携式检测仪", "云端质控平台"],
+  "annual_revenue_range": "人民币 1-3 亿元",
+  "export_experience": "已通过贸易商向东南亚出口 2 年，正在建设欧洲直销和经销体系。",
+  "current_export_countries": ["新加坡", "马来西亚"],
+  "capacity_status": {
+    "monthly_units": 12000,
+    "lead_time_days": 28,
+    "expandable_capacity_units": 20000
+  },
+  "certifications": ["ISO 13485", "CE", "RoHS"],
+  "financing_needs": {
+    "amount_cny": 18000000,
+    "purpose": ["欧盟注册", "本地售后网络", "产线自动化升级"]
+  },
+  "overseas_goals": ["12 个月内完成德国首批渠道签约", "24 个月内实现欧洲销售额 3000 万元"],
+  "investment_profile": {
+    "gross_margin": "48%",
+    "revenue_growth": "32%",
+    "preferred_investors": ["医疗产业基金", "跨境渠道资源方"]
+  },
+  "market_entry_preferences": {
+    "target_regions": ["德国", "荷兰"],
+    "entry_modes": ["本地经销商", "展会获客", "售后服务伙伴"],
+    "risk_preference": "稳健"
+  },
+  "channel_requirements": {
+    "preferred_partners": ["医疗器械经销商", "区域售后服务商"],
+    "must_have_capabilities": ["CE 合规经验", "医院客户覆盖", "冷链和备件服务"]
+  },
+  "expansion_plan": {
+    "new_lines": 1,
+    "capex_cny": 12000000,
+    "capacity_ramp_months": 9
+  },
+  "metadata": {
+    "sample_use": "e2e_acceptance",
+    "owner_department": "海外业务部"
+  }
+}
