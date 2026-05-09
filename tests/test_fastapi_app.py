@@ -256,3 +256,64 @@ def test_knowledge_embed_and_search_api(tmp_path):
     assert result["metadata"]["country"] == "德国"
     assert empty_response.status_code == 200
     assert empty_response.json() == {"results": []}
+
+
+def test_knowledge_file_upload_rejects_disallowed_type(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("sqlalchemy")
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from agent_overseas_report.database import create_session_factory, initialize_database
+    from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, SQLAlchemyKnowledgeBaseRepository
+
+    monkeypatch.setenv("ALLOWED_UPLOAD_EXTENSIONS", ".txt")
+    monkeypatch.setenv("ALLOWED_UPLOAD_MIME_TYPES", "text/plain")
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    initialize_database(engine)
+    knowledge_service = KnowledgeBaseService(
+        SQLAlchemyKnowledgeBaseRepository(create_session_factory(engine)), tmp_path / "uploads"
+    )
+    client = TestClient(create_app(generation_service=make_service(), knowledge_base_service=knowledge_service))
+
+    response = client.post(
+        "/api/knowledge/files/upload",
+        files={"file": ("blocked.exe", b"blocked", "application/octet-stream")},
+    )
+
+    assert response.status_code == 415
+    assert "Unsupported file extension" in response.json()["detail"]
+
+
+def test_knowledge_file_upload_rejects_oversized_file(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("sqlalchemy")
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from agent_overseas_report.database import create_session_factory, initialize_database
+    from agent_overseas_report.knowledge_base.local_files import KnowledgeBaseService, SQLAlchemyKnowledgeBaseRepository
+
+    monkeypatch.setenv("MAX_UPLOAD_BYTES", "5")
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    initialize_database(engine)
+    knowledge_service = KnowledgeBaseService(
+        SQLAlchemyKnowledgeBaseRepository(create_session_factory(engine)), tmp_path / "uploads"
+    )
+    client = TestClient(create_app(generation_service=make_service(), knowledge_base_service=knowledge_service))
+
+    response = client.post(
+        "/api/knowledge/files/upload",
+        files={"file": ("too-big.txt", b"123456", "text/plain")},
+    )
+
+    assert response.status_code == 413
+    assert "exceeds configured limit" in response.json()["detail"]

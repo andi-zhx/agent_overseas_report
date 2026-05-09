@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Generator
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from agent_overseas_report.config import AppSettings
 from agent_overseas_report.database.models import Base
 
-DEFAULT_SQLITE_PATH = Path(".data/overseas_report.sqlite3")
 
 
 def get_database_url() -> str:
     """Return configured database URL, defaulting to a local SQLite file."""
 
-    return os.getenv("OVERSEAS_REPORT_DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH}")
+    return AppSettings.from_env().database_url
 
 
 def create_database_engine(database_url: str | None = None) -> Engine:

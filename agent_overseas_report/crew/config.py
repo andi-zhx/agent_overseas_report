@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_TRUE_VALUES = {"1", "true", "yes", "y", "on"}
+from agent_overseas_report.config import AppSettings
 
 NO_FABRICATION_CONSTRAINT = "不得编造数据；若 ContextBundle 未提供事实、数值、年份、来源或假设，必须标记为信息缺口/需人工复核。"
 CITATION_CONSTRAINT = "所有事实、数据、政策、市场判断和资源建议必须附 citations，引用 ContextBundle 中的 source_id、url、文件名或资料标识。"
@@ -50,9 +49,8 @@ class CrewAISettings:
         path remains the default production behavior.
         """
 
-        enabled = os.getenv("ENABLE_CREWAI", "").strip().lower() in _TRUE_VALUES
-        verbose = os.getenv("CREWAI_VERBOSE", "").strip().lower() in _TRUE_VALUES
-        return cls(enabled=enabled, verbose=verbose, agent_configs=default_agent_configs())
+        settings = AppSettings.from_env()
+        return cls(enabled=settings.enable_crewai, verbose=settings.crewai_verbose, agent_configs=default_agent_configs())
 
 
 def is_crewai_enabled() -> bool:
